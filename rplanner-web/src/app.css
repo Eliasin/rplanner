@@ -1,0 +1,48 @@
+.sidebar {
+    height: 100%;
+    position: fixed;
+    width: 160px;
+    z-index: 1;
+    top: 0;
+    left: 0;
+    background-color: #111;
+    overflow-x: hidden;
+}
+
+.sidebar-element {
+    background: none;
+    border: none;
+    margin: 10px;
+    font-size: 25px;
+    color: #AAA;
+    display: block;
+    font-family: arial;
+}
+
+.sidebar-element:hover {
+    color: #555;
+}
+
+.note {
+    background-color: #333;
+    color: #FFF;
+}
+
+.note-text {
+    resize: none;
+    outline: none;
+}
+
+.function-bar.list-group {
+    top: 0px;
+    height: 100%;
+    right: 0px;
+    float: right;
+    position: fixed;
+}
+
+.main {
+    position: fixed;
+    margin-left: 160px;
+    font-family: arial;
+}
