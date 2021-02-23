@@ -3,9 +3,11 @@ import ReactDOM from 'react-dom';
 import reportWebVitals from './reportWebVitals';
 import { App } from './app';
 
+const noteChangeTimers = new Map();
+
 ReactDOM.render(
   <React.StrictMode>
-    <App />
+    <App noteTimers={noteChangeTimers} />
   </React.StrictMode>,
   document.getElementById('root')
 );

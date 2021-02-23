@@ -206,6 +206,28 @@ fn set_note(set_note_request: Json<SetNoteRequest>, db_connection: State<DBConne
     Ok(())
 }
 
+fn delete_note_from_db(note_id: NoteID, db_connection: &Connection) -> InternalResult<()> {
+    db_connection.execute("DELETE FROM notes WHERE rowid = (?1)", params![note_id])?;
+
+    Ok(())
+}
+
+#[derive(Deserialize, Debug)]
+struct DeleteNoteRequest {
+    note_id: i64,
+}
+
+#[post("/delete_note", format = "json", data = "<delete_note_request>")]
+fn delete_note(delete_note_request: Json<DeleteNoteRequest>, db_connection: State<DBConnection>) -> InternalResult<()> {
+    let db_connection = db_connection.lock()?;
+
+    let note_id = delete_note_request.note_id;
+    delete_note_contents_from_db(note_id, &db_connection)?;
+    delete_note_from_db(note_id, &db_connection)?;
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::open("rplanner.db")?;
 
@@ -216,7 +238,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     rocket::ignite()
         .manage(connection.clone())
-        .mount("/api", routes![notes, add_note, set_note])
+        .mount("/api", routes![notes, add_note, set_note, delete_note])
         .mount("/images", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/images")).rank(15))
         .mount("/", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/web")))
         .launch();

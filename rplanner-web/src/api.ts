@@ -51,3 +51,21 @@ export async function setNote(note_id: number, note: Note) {
         body: JSON.stringify(setNoteRequest)
     }));
 }
+
+export type DeleteNoteRequest = {
+    note_id: number;
+};
+
+export async function deleteNote(note_id: number) {
+    const deleteNoteRequest: DeleteNoteRequest = {
+        note_id,
+    };
+
+    return (await fetch('/api/delete_note', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(deleteNoteRequest),
+    }));
+}

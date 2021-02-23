@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Nav, ListGroup, Button } from 'react-bootstrap';
-import { addNote, getNotes, Note, NoteID, NoteFragment, TextNote, setNote } from './api';
+import { addNote, getNotes, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlus } from '@fortawesome/free-solid-svg-icons'
+import { faPlus, faTimes } from '@fortawesome/free-solid-svg-icons'
 
 import './app.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -37,33 +37,31 @@ function createFragmentElement(fragment: NoteFragment): JSX.Element {
     return <p />;
 }
 
-function parseNote(note: Note, note_id: NoteID): JSX.Element {
+function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void): JSX.Element {
     let contents = note.content.reduce((elem: JSX.Element, fragment: NoteFragment) => {
         return <>{elem}{createFragmentElement(fragment)}</>;
     }, <></>);
 
-    return <div id={'note-' + note_id} className='note' data-note-id={note_id} contentEditable>{contents}</div>;
+    const noteText = <div id={'note-' + note_id} className='note' data-note-id={note_id} contentEditable>{contents}</div>;
+    const deleteButton = <Button variant='dark' onClick={() => {
+        deleteNote(note_id);
+        requestNoteRefresh();
+    }}><FontAwesomeIcon icon={faTimes} /></Button>;
+
+    return <>{noteText}{deleteButton}</>;
 }
 
-type FunctionBarProps = {
-    section: Section;
+type NoteFunctionBarProps = {
+    requestNoteRefresh: () => void;
 }
 
-function FunctionBar(props: FunctionBarProps) {
-    switch (props.section) {
-            case 'Notes': {
-                return (
-                    <ListGroup className='function-bar'>
-                        <ListGroup.Item><Button variant="dark" onClick={() => {
-                            addNote({ content: [{ Text: 'New note...' }], date: new Date().toUTCString() });
-                        }}><FontAwesomeIcon icon={faPlus} /></Button></ListGroup.Item>
-                    </ListGroup>
-                );
-            }
-    }
+function NoteFunctionBar(props: NoteFunctionBarProps) {
     return (
         <ListGroup className='function-bar'>
-            <ListGroup.Item>Function Bar</ListGroup.Item>
+            <ListGroup.Item><Button variant="dark" onClick={() => {
+                addNote({ content: [{ Text: 'New note...' }], date: new Date().toUTCString() });
+                props.requestNoteRefresh();
+            }}><FontAwesomeIcon icon={faPlus} /></Button></ListGroup.Item>
         </ListGroup>
     );
 }
@@ -171,19 +169,17 @@ function tickNoteTimers(noteTimers: Map<number, NoteChangeTimer>) {
 
 type NotesProps = {
     noteChangeTimers: NoteChangeTimers;
+    notes: Array<[NoteID, Note]>;
+    requestNoteRefresh: () => void;
+}
+
+function compareNotes(a: [NoteID, Note], b: [NoteID, Note]): number {
+    return a[0] - b[0];
 }
 
 function Notes(props: NotesProps) {
-    const [notes, setNotes] = useState<Array<[NoteID, Note]>>([]);
-    const [needRefresh, setNeedRefresh] = useState(false);
+    const notes = props.notes;
     const noteChangeTimers = props.noteChangeTimers;
-
-    useEffect(() => {
-        getNotes().then((response: any) => {
-            setNotes(response);
-            setNeedRefresh(false);
-        });
-    }, [needRefresh]);
 
     useEffect(() => {
         updateNoteChangeTimers(notes, noteChangeTimers);
@@ -208,9 +204,9 @@ function Notes(props: NotesProps) {
     }, [notes, noteChangeTimers]);
 
     if (notes.length !== 0) {
-        const noteElements = notes.reduce((elem: JSX.Element, note_pair: [NoteID, Note]) => {
+        const noteElements = notes.sort(compareNotes).reduce((elem: JSX.Element, note_pair: [NoteID, Note]) => {
             const [note_id, note] = note_pair;
-            return <>{elem}{parseNote(note, note_id)}</>;
+            return <>{elem}{parseNote(note, note_id, props.requestNoteRefresh)}</>;
         }, <></>);
 
         return <div className='notes'>{noteElements}</div>;
@@ -237,19 +233,36 @@ function createAddSidebar(setSection: (section: Section) => void): (component: J
     };
 }
 
-function addFunctionBar(component: JSX.Element, section: Section): JSX.Element {
-    return <>{component}<FunctionBar section={section} /></>;
+function addNoteFunctionBar(component: JSX.Element, requestNoteRefresh: () => void): JSX.Element {
+    return <>{component}<NoteFunctionBar requestNoteRefresh={requestNoteRefresh} /></>;
 }
 
-export function App() {
-    const [section, setSection] = useState<Section>('Notes');
+type AppProps = {
+    noteTimers: NoteChangeTimers;
+};
 
-    const noteTimers = new Map();
+export function App(props: AppProps) {
+    const [section, setSection] = useState<Section>('Notes');
+    const [notes, setNotes] = useState<Array<[NoteID, Note]>>([]);
+    const [needRefresh, setNeedRefresh] = useState(false);
+    const noteTimers = props.noteTimers;
+
+    const requestNoteRefresh = () => {
+        setNeedRefresh(true);
+    };
+
+    useEffect(() => {
+        getNotes().then((response: any) => {
+            setNotes(response);
+            setNeedRefresh(false);
+        });
+    }, [needRefresh]);
+
     const addSidebar = createAddSidebar(setSection);
 
     switch (section) {
             case 'Notes': {
-                return addFunctionBar(addSidebar(<Notes noteChangeTimers={noteTimers} />), section);
+                return addNoteFunctionBar(addSidebar(<Notes noteChangeTimers={noteTimers} notes={notes} requestNoteRefresh={requestNoteRefresh} />), requestNoteRefresh);
             }
             case 'Todo': {
                 return addSidebar(<Todo />);
