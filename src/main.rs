@@ -117,19 +117,21 @@ fn notes(db_connection: State<DBConnection>) -> InternalResult<Json<Vec<(NoteID,
         Ok(())
     })?.next();
 
-    let mut text_statement = db_connection.prepare("SELECT * FROM note_text_elements")?;
-    let mut image_statement = db_connection.prepare("SELECT * FROM note_image_elements")?;
+    let mut text_statement = db_connection.prepare("SELECT note_id, content, num FROM note_text_elements")?;
+    let mut image_statement = db_connection.prepare("SELECT note_id, path, num FROM note_image_elements")?;
 
     let mut note_fragments = FragmentMap::new();
-    text_statement.query_map(NO_PARAMS , |row| {
-        add_fragment(&mut note_fragments, row, FragmentTag::Text);
-        Ok(())
-    })?.next();
+    let mut rows = text_statement.query(NO_PARAMS)?;
 
-    image_statement.query_map(NO_PARAMS , |row| {
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Text);
+    }
+
+    let mut rows = image_statement.query(NO_PARAMS)?;
+
+    while let Some(row) = rows.next()? {
         add_fragment(&mut note_fragments, row, FragmentTag::Image);
-        Ok(())
-    })?.next();
+    }
 
     Ok(Json(construct_notes(&mut note_fragments, &date_map)))
 }

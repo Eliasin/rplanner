@@ -26,6 +26,8 @@
 .note {
     background-color: #333;
     color: #FFF;
+    border: solid;
+    border-color: blue;
 }
 
 .note-text {
