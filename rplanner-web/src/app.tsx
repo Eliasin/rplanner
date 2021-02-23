@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Nav, ListGroup, Button } from 'react-bootstrap';
-import { addNote, getNotes, Note, NoteFragment } from './api';
+import { Nav, ListGroup, Button } from 'react-bootstrap';
+import { addNote, getNotes, Note, NoteID, NoteFragment, TextNote, setNote } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlus } from '@fortawesome/free-solid-svg-icons'
 
@@ -37,16 +37,12 @@ function createFragmentElement(fragment: NoteFragment): JSX.Element {
     return <p />;
 }
 
-function parseNote(note: Note): JSX.Element {
+function parseNote(note: Note, note_id: NoteID): JSX.Element {
     let contents = note.content.reduce((elem: JSX.Element, fragment: NoteFragment) => {
         return <>{elem}{createFragmentElement(fragment)}</>;
     }, <></>);
 
-    return <div className='note' contentEditable>{contents}</div>;
-}
-
-function AddNoteForm() {
-
+    return <div id={'note-' + note_id} className='note' data-note-id={note_id} contentEditable>{contents}</div>;
 }
 
 type FunctionBarProps = {
@@ -58,7 +54,9 @@ function FunctionBar(props: FunctionBarProps) {
             case 'Notes': {
                 return (
                     <ListGroup className='function-bar'>
-                        <ListGroup.Item><Button variant="dark"><FontAwesomeIcon icon={faPlus} /></Button></ListGroup.Item>
+                        <ListGroup.Item><Button variant="dark" onClick={() => {
+                            addNote({ content: [{ Text: 'New note...' }], date: new Date().toUTCString() });
+                        }}><FontAwesomeIcon icon={faPlus} /></Button></ListGroup.Item>
                     </ListGroup>
                 );
             }
@@ -70,38 +68,154 @@ function FunctionBar(props: FunctionBarProps) {
     );
 }
 
-function noteInputEventListener(e: Event) {
-    console.log(e)
+type NoteChangeTimer = {
+    maxTimerValue: number;
+    ticksSinceLastChange: number;
+};
+
+type NoteChangeTimers = Map<NoteID, NoteChangeTimer>;
+
+function resetNoteChangeTimer(noteID: NoteID, noteTimers: NoteChangeTimers) {
+    const timer = noteTimers.get(noteID);
+    if (timer !== undefined) {
+        timer.ticksSinceLastChange = 0;
+    }
 }
 
-function Notes() {
-    const [notes, setNotes] = useState([]);
+function flushNoteChanges(noteElement: HTMLElement) {
+    if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
+        return;
+    }
+
+    const noteID = parseInt(noteElement.dataset['noteId']);
+
+    if (isNaN(noteID)) {
+        return;
+    }
+
+    const textFragment: TextNote = {
+        Text: noteElement.textContent ?? ''
+    };
+
+    const note: Note = {
+        content: [textFragment],
+        date: new Date().toUTCString()
+    };
+
+    setNote(noteID, note);
+}
+
+function createNoteInputEventListener(noteTimers: NoteChangeTimers): (e: Event) => void {
+    return (e: Event) => {
+        const noteElement = e.target as HTMLElement;
+
+        if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
+            return;
+        }
+
+        const noteID = parseInt(noteElement.dataset['noteId']);
+
+        if (isNaN(noteID)) {
+            return;
+        }
+
+        resetNoteChangeTimer(noteID, noteTimers);
+    };
+}
+
+function updateNoteChangeTimers(notes: Array<[NoteID, Note]>, noteTimers: NoteChangeTimers) {
+    const needAdd = [];
+    const ids = [];
+    for (const [id, ] of notes) {
+        if (!noteTimers.has(id)) {
+            needAdd.push(id);
+        }
+        ids.push(id);
+    }
+
+    const needDelete = [];
+    for (const [id, ] of noteTimers) {
+        if (!ids.includes(id)) {
+            needDelete.push(id);
+        }
+    }
+
+    for (const id of needAdd) {
+        noteTimers.set(id, {
+            maxTimerValue: 2,
+            ticksSinceLastChange: 2
+        });
+    }
+
+    for (const id of needDelete) {
+        noteTimers.delete(id);
+    }
+}
+
+function tickNoteTimers(noteTimers: Map<number, NoteChangeTimer>) {
+    for (const [id, timer] of noteTimers) {
+        if (timer.ticksSinceLastChange === timer.maxTimerValue) {
+            continue;
+        }
+
+        timer.ticksSinceLastChange += 1;
+
+        if (timer.ticksSinceLastChange === timer.maxTimerValue) {
+            const noteElement = document.getElementById('note-' + id);
+            if (noteElement !== null) {
+                flushNoteChanges(noteElement);
+            }
+        }
+    }
+}
+
+type NotesProps = {
+    noteChangeTimers: NoteChangeTimers;
+}
+
+function Notes(props: NotesProps) {
+    const [notes, setNotes] = useState<Array<[NoteID, Note]>>([]);
+    const [needRefresh, setNeedRefresh] = useState(false);
+    const noteChangeTimers = props.noteChangeTimers;
 
     useEffect(() => {
         getNotes().then((response: any) => {
             setNotes(response);
+            setNeedRefresh(false);
         });
-    }, []);
+    }, [needRefresh]);
 
     useEffect(() => {
-        let notes = Array.from(document.getElementsByClassName('note'));
+        updateNoteChangeTimers(notes, noteChangeTimers);
 
-        for (const note of notes) {
-            note.removeEventListener('input', noteInputEventListener);
-            note.addEventListener('input', noteInputEventListener);
+        const intervalID = setInterval(() => {
+            tickNoteTimers(noteChangeTimers);
+        }, 1000);
+
+        return () => {
+            clearInterval(intervalID);
+        };
+    }, [notes, noteChangeTimers]);
+
+    useEffect(() => {
+        let noteElements = Array.from(document.getElementsByClassName('note'));
+
+        const noteInputEventListener = createNoteInputEventListener(noteChangeTimers);
+        for (const element of noteElements) {
+            element.removeEventListener('input', noteInputEventListener);
+            element.addEventListener('input', noteInputEventListener);
         }
-    }, [notes]);
+    }, [notes, noteChangeTimers]);
 
     if (notes.length !== 0) {
-        const noteElements = notes.reduce((elem: JSX.Element, note: Note) => {
-            return <>{elem}{parseNote(note)}</>;
+        const noteElements = notes.reduce((elem: JSX.Element, note_pair: [NoteID, Note]) => {
+            const [note_id, note] = note_pair;
+            return <>{elem}{parseNote(note, note_id)}</>;
         }, <></>);
 
         return <div className='notes'>{noteElements}</div>;
     } else {
-        return <div className='notes'><button children={'ADD NOTE'} onClick={() => {
-            addNote({ content: [{ Text: 'test' }], date: new Date().toUTCString() });
-        }} /></div>;
+        return <div className='notes'></div>;
     }
 }
 
@@ -130,11 +244,12 @@ function addFunctionBar(component: JSX.Element, section: Section): JSX.Element {
 export function App() {
     const [section, setSection] = useState<Section>('Notes');
 
+    const noteTimers = new Map();
     const addSidebar = createAddSidebar(setSection);
 
     switch (section) {
             case 'Notes': {
-                return addFunctionBar(addSidebar(<Notes />), section);
+                return addFunctionBar(addSidebar(<Notes noteChangeTimers={noteTimers} />), section);
             }
             case 'Todo': {
                 return addSidebar(<Todo />);

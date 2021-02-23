@@ -67,7 +67,7 @@ fn add_fragment(fragments: &mut FragmentMap, row: &Row, tag: FragmentTag) {
     }
 }
 
-fn construct_notes(note_fragments: &mut FragmentMap, date_map: &HashMap<i64, String>) -> Vec<Note> {
+fn construct_notes(note_fragments: &mut FragmentMap, date_map: &HashMap<i64, String>) -> Vec<(NoteID, Note)> {
     let mut notes = vec![];
 
     for (note_id, fragments) in note_fragments.iter_mut() {
@@ -85,7 +85,7 @@ fn construct_notes(note_fragments: &mut FragmentMap, date_map: &HashMap<i64, Str
             note.content.push(fragment.0.clone());
         }
 
-        notes.push(note);
+        notes.push((*note_id, note));
     }
 
     notes
@@ -106,7 +106,7 @@ fn add_note_date(date_map: &mut HashMap<i64, String>, row: &Row) {
 }
 
 #[get("/notes")]
-fn notes(db_connection: State<DBConnection>) -> InternalResult<Json<Vec<Note>>> {
+fn notes(db_connection: State<DBConnection>) -> InternalResult<Json<Vec<(NoteID, Note)>>> {
     let db_connection = db_connection.lock()?;
 
     let mut note_statement = db_connection.prepare("SELECT rowid, date FROM notes")?;
@@ -134,23 +134,72 @@ fn notes(db_connection: State<DBConnection>) -> InternalResult<Json<Vec<Note>>> 
     Ok(Json(construct_notes(&mut note_fragments, &date_map)))
 }
 
-#[post("/add_note", format = "json", data = "<note>")]
-fn add_note(note: Json<Note>, db_connection: State<DBConnection>) -> InternalResult<()> {
-    let db_connection = db_connection.lock()?;
+#[derive(Serialize, Debug)]
+struct AddNoteResult {
+    note_id: NoteID,
+}
 
-    db_connection.execute("INSERT INTO notes VALUES (?1)", &[Utc::now().to_rfc2822()])?;
-    let id = db_connection.last_insert_rowid().to_string();
-
-    for (num, element) in note.content.iter().enumerate() {
+fn add_note_contents_to_db(note_id: NoteID, note_content: impl Iterator<Item = NoteElement>, db_connection: &Connection) -> InternalResult<()> {
+    for (num, element) in note_content.enumerate() {
         match element {
             NoteElement::Text(t) => {
-                db_connection.execute("INSERT INTO note_text_elements VALUES (?1, ?2, ?3)", &[id.clone(), t.clone(), num.to_string()])?;
+                db_connection.execute("INSERT INTO note_text_elements VALUES (?1, ?2, ?3)", params![note_id, t.clone(), num as i64])?;
             },
             NoteElement::Image(path) => {
-                db_connection.execute("INSERT INTO note_image_elements VALUES (?1, ?2, ?3)", &[id.clone(), path.clone(), num.to_string()])?;
+                db_connection.execute("INSERT INTO note_image_elements VALUES (?1, ?2, ?3)", params![note_id, path.clone(), num as i64])?;
             },
         }
     }
+
+    Ok(())
+}
+
+fn add_note_to_db(note: Note, db_connection: &Connection) -> InternalResult<AddNoteResult> {
+    db_connection.execute("INSERT INTO notes VALUES (?1)", &[Utc::now().to_rfc2822()])?;
+    let id = db_connection.last_insert_rowid();
+
+    add_note_contents_to_db(id, &mut note.content.into_iter(), db_connection)?;
+
+    Ok(AddNoteResult {
+        note_id: id
+    })
+}
+
+#[post("/add_note", format = "json", data = "<note>")]
+fn add_note(note: Json<Note>, db_connection: State<DBConnection>) -> InternalResult<Json<AddNoteResult>> {
+    let db_connection = db_connection.lock()?;
+    add_note_to_db(note.into_inner(), &db_connection).map(|r| Json(r))
+}
+
+#[derive(Deserialize, Debug)]
+struct SetNoteRequest {
+    note_id: i64,
+    note: Note,
+}
+
+fn delete_note_contents_from_db(note_id: NoteID, db_connection: &Connection) -> InternalResult<()> {
+    db_connection.execute("DELETE FROM note_text_elements WHERE note_id = (?1)", params![note_id])?;
+    db_connection.execute("DELETE FROM note_image_elements WHERE note_id = (?1)", params![note_id])?;
+
+    Ok(())
+}
+
+fn update_note_date(note_id: NoteID, date: String, db_connection: &Connection) -> InternalResult<()> {
+    db_connection.execute("UPDATE notes SET date = (?1) WHERE rowid = (?2)", params![date, note_id])?;
+    Ok(())
+}
+
+#[post("/set_note", format = "json", data = "<set_note_request>")]
+fn set_note(set_note_request: Json<SetNoteRequest>, db_connection: State<DBConnection>) -> InternalResult<()> {
+    let db_connection = db_connection.lock()?;
+
+    let date = set_note_request.note.date.clone();
+    let note_id = set_note_request.note_id;
+    update_note_date(note_id, date, &db_connection)?;
+    delete_note_contents_from_db(note_id, &db_connection)?;
+
+    let note_contents = set_note_request.into_inner().note.content;
+    add_note_contents_to_db(note_id, note_contents.into_iter(), &*db_connection)?;
 
     Ok(())
 }
@@ -165,7 +214,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     rocket::ignite()
         .manage(connection.clone())
-        .mount("/api", routes![notes, add_note])
+        .mount("/api", routes![notes, add_note, set_note])
         .mount("/images", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/images")).rank(15))
         .mount("/", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/web")))
         .launch();
