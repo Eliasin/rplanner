@@ -57,6 +57,17 @@
     margin-right: 7px;
 }
 
+.noteImage {
+    justify-self: end;
+    width: 40px;
+    height: 40px;
+    grid-column: 2;
+    grid-row: 1;
+    text-align: center;
+    margin-top: 7px;
+    margin-right: 7px;
+}
+
 .note {
     margin: 2%;
     grid-column-start: 1;
@@ -74,13 +85,21 @@
     border-width: 5px;
 }
 
+#imgUpload {
+    display: none;
+}
+
 .function-bar.list-group {
     top: 0px;
     height: 100%;
     right: 0px;
     float: right;
     position: fixed;
-    width: 5%;
+    width: 8%;
+}
+
+.function-bar svg {
+    margin: 3px;
 }
 
 .main {

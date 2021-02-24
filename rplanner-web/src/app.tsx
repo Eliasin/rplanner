@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Nav, ListGroup, Button } from 'react-bootstrap';
+import { Nav, ListGroup, Button, Modal } from 'react-bootstrap';
 import { addNote, getNotes, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlus, faTimes } from '@fortawesome/free-solid-svg-icons'
+import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
 import './app.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -37,7 +37,7 @@ function createFragmentElement(fragment: NoteFragment): JSX.Element {
     return <p />;
 }
 
-function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void): JSX.Element {
+function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void, openImageModal: (noteID: NoteID) => void): JSX.Element {
     let contents = note.content.reduce((elem: JSX.Element, fragment: NoteFragment) => {
         return <>{elem}{createFragmentElement(fragment)}</>;
     }, <></>);
@@ -48,8 +48,9 @@ function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void):
         deleteNote(note_id);
         requestNoteRefresh();
     }}><FontAwesomeIcon icon={faTimes} size='sm' /></Button>;
+    const addImageButton = <Button className='noteImage' size='sm' onClick={() => openImageModal(note_id)}><FontAwesomeIcon icon={faImage} size='sm'/></Button>;
 
-    return <div className='noteBlock'>{deleteButton}{noteElement}</div>;
+    return <div className='noteBlock'>{addImageButton}{deleteButton}{noteElement}</div>;
 }
 
 type NoteFunctionBarProps = {
@@ -63,6 +64,11 @@ function NoteFunctionBar(props: NoteFunctionBarProps) {
                 addNote({ content: [{ Text: 'New note...' }], date: new Date().toUTCString() });
                 props.requestNoteRefresh();
             }}><FontAwesomeIcon icon={faPlus} /></Button></ListGroup.Item>
+            <ListGroup.Item><input id='imgUpload' type='file' /><Button variant="dark" onClick={() => {
+                const inputElement = document.getElementById('imgUpload') as HTMLInputElement;
+
+                inputElement.click();
+            }}><FontAwesomeIcon icon={faPlus} /><FontAwesomeIcon icon={faImage} /></Button></ListGroup.Item>
         </ListGroup>
     );
 }
@@ -178,9 +184,30 @@ function compareNotes(a: [NoteID, Note], b: [NoteID, Note]): number {
     return a[0] - b[0];
 }
 
+type ImageModalState = { kind: 'open'; id: NoteID } | { kind: 'closed' };
+
+type ImageModalProps = {
+    state: ImageModalState;
+    hideImageModal: () => void;
+};
+
+function ImageModal(props: ImageModalProps) {
+    if (props.state.kind === 'open') {
+        const imageModal = <Modal show={props.state.kind === 'open'} onHide={props.hideImageModal}>
+            <Modal.Title>{props.state.id}</Modal.Title>
+            </Modal>;
+
+        return imageModal;
+    }
+
+    return <Modal show={false} />;
+}
+
 function Notes(props: NotesProps) {
     const notes = props.notes;
+    const [imageModalState, setImageModalState] = useState<ImageModalState>({ kind: 'closed' });
     const noteChangeTimers = props.noteChangeTimers;
+    const openImageModal = (id: NoteID) => setImageModalState({ kind: 'open', id, });
 
     useEffect(() => {
         updateNoteChangeTimers(notes, noteChangeTimers);
@@ -204,15 +231,16 @@ function Notes(props: NotesProps) {
         }
     }, [notes, noteChangeTimers]);
 
+
     if (notes.length !== 0) {
         const noteElements = notes.sort(compareNotes).reduce((elem: JSX.Element, note_pair: [NoteID, Note]) => {
             const [note_id, note] = note_pair;
-            return <>{elem}{parseNote(note, note_id, props.requestNoteRefresh)}</>;
+            return <>{elem}{parseNote(note, note_id, props.requestNoteRefresh, openImageModal)}</>;
         }, <></>);
 
-        return <div className='notes'>{noteElements}</div>;
+        return <><ImageModal state={imageModalState} hideImageModal={() => setImageModalState({kind: 'closed'})} /><div className='notes'>{noteElements}</div></>;
     } else {
-        return <div className='notes'></div>;
+        return <><div className='notes'></div></>;
     }
 }
 
