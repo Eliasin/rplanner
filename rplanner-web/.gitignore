@@ -1,9 +1,0 @@
-.DS_Store
-.idea
-*.log
-tmp/
-
-rplanner-web/build/
-rplanner-web/node_modules/
-
-rplanner.db

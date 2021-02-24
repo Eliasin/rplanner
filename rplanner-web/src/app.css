@@ -1,7 +1,7 @@
 .sidebar {
     height: 100%;
     position: fixed;
-    width: 160px;
+    width: 10%;
     z-index: 1;
     top: 0;
     left: 0;
@@ -23,16 +23,55 @@
     color: #555;
 }
 
-.note {
-    background-color: #333;
-    color: #FFF;
-    border: solid;
-    border-color: blue;
+.notes {
+    display: flex;
+    flex-flow: row;
+    flex-wrap: wrap;
+    align-items: start;
 }
 
-.note-text {
+.noteBlock {
+    display: grid;
+    grid-template-columns: 3fr 3fr 1fr;
+    grid-template-rows: minmax(auto, 40px) 4fr;
+    background-color: #333;
+    margin: 20px;
+    border: solid;
+    border-color: #333;
+    border-radius: 2px;
+    padding: 3px;
+    max-width: 20vw;
+    min-height: 20vh;
+    min-width: 20vw;
+    filter: drop-shadow(2px 0px 3px #333);
+}
+
+.noteDelete {
+    justify-self: end;
+    width: 40px;
+    height: 40px;
+    grid-column: 3;
+    grid-row: 1;
+    text-align: center;
+    margin-top: 7px;
+    margin-right: 7px;
+}
+
+.note {
+    margin: 2%;
+    grid-column-start: 1;
+    grid-column-end: 4;
+    grid-row: 2;
+    word-wrap: break-word;
+    max-width: 96%;
+    background-color: #FFF;
+    color: #000;
     resize: none;
     outline: none;
+    border: solid;
+    border-color: white;
+    border-radius: 3px;
+    border-width: 5px;
 }
 
 .function-bar.list-group {
@@ -41,10 +80,14 @@
     right: 0px;
     float: right;
     position: fixed;
+    width: 5%;
 }
 
 .main {
     position: fixed;
-    margin-left: 160px;
+    margin-left: 10%;
     font-family: arial;
+    margin-right: 5%;
+    height: 100%;
+    width: calc(95% - 160px);
 }

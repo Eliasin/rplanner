@@ -42,13 +42,14 @@ function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void):
         return <>{elem}{createFragmentElement(fragment)}</>;
     }, <></>);
 
-    const noteText = <div id={'note-' + note_id} className='note' data-note-id={note_id} contentEditable>{contents}</div>;
-    const deleteButton = <Button variant='dark' onClick={() => {
+    const noteElement =
+        <div id={'note-' + note_id} className='note' data-note-id={note_id} contentEditable>{contents}</div>;
+    const deleteButton = <Button size='sm' className='noteDelete' variant='danger' onClick={() => {
         deleteNote(note_id);
         requestNoteRefresh();
-    }}><FontAwesomeIcon icon={faTimes} /></Button>;
+    }}><FontAwesomeIcon icon={faTimes} size='sm' /></Button>;
 
-    return <>{noteText}{deleteButton}</>;
+    return <div className='noteBlock'>{deleteButton}{noteElement}</div>;
 }
 
 type NoteFunctionBarProps = {

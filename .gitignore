@@ -4,4 +4,7 @@
 
 /rplanner-web/build/
 /rplanner-web/node_modules/
+/rplanner-web/.eslintcache
 /images
+
+rplanner.db
