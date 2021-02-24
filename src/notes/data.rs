@@ -1,0 +1,45 @@
+use rusqlite::Connection;
+use serde::{ Serialize, Deserialize };
+
+use std::sync::{ Mutex, Arc };
+use std::collections::HashMap;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum NoteElement {
+    Text(String),
+    Image(String),
+}
+
+pub enum FragmentTag {
+    Text,
+    Image
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Note {
+    pub content: Vec<NoteElement>,
+    pub date: String,
+}
+
+pub type DBConnection = Arc<Mutex<Connection>>;
+pub type NoteID = i64;
+pub type FragmentNum = i64;
+pub type NoteFragment = (NoteID, NoteElement, FragmentNum);
+
+pub type FragmentMap = HashMap<NoteID, Vec<(NoteElement, FragmentNum)>>;
+
+#[derive(Serialize, Debug)]
+pub struct AddNoteResult {
+    pub note_id: NoteID,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SetNoteRequest {
+    pub note_id: i64,
+    pub note: Note,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DeleteNoteRequest {
+    pub note_id: i64,
+}
