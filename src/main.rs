@@ -1,6 +1,8 @@
 #![feature(proc_macro_hygiene, decl_macro)]
 use rusqlite::{ Connection, params, NO_PARAMS, Row };
-use rocket::State;
+use rocket::{ State, Data };
+use rocket::http::ContentType;
+use rocket_multipart_form_data::{ MultipartFormDataOptions, MultipartFormData, mime, MultipartFormDataField };
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::json::Json;
 use serde::{ Serialize, Deserialize };
@@ -9,10 +11,14 @@ use chrono::offset::Utc;
 use std::error::Error;
 use std::sync::{ Mutex, Arc };
 use std::collections::HashMap;
+use std::path::Path;
+use std::fs::File;
+use std::io;
+use std::io::Write;
 
 mod internal_error;
 
-use internal_error::InternalResult;
+use internal_error::{ InternalResult, InternalError };
 
 #[macro_use] extern crate rocket;
 
@@ -228,6 +234,38 @@ fn delete_note(delete_note_request: Json<DeleteNoteRequest>, db_connection: Stat
     Ok(())
 }
 
+fn write_data_to_disk(path: &Path, data: &Vec<u8>) -> io::Result<()> {
+    let mut file = File::create(path)?;
+
+    file.write(data)?;
+    Ok(())
+}
+
+#[post("/upload_image?<name>", format="multipart/form-data", data="<data>")]
+fn upload_image(name: String, content_type: &ContentType, data: Data) -> InternalResult<()> {
+    let options = MultipartFormDataOptions::with_multipart_form_data_fields(vec![
+        MultipartFormDataField::raw("image").size_limit(32 * 1024 * 1024).content_type_by_string(Some(mime::IMAGE_STAR)).unwrap()
+    ]);
+
+    let mut multipart_form_data = MultipartFormData::parse(content_type, data, options)?;
+
+    let image = multipart_form_data.raw.remove("image");
+
+    match image {
+        Some(mut image) => {
+            let raw = image.remove(0);
+
+            let data = raw.raw;
+
+            write_data_to_disk(&Path::new("images/").join(Path::new(&name)), &data)?;
+            Ok(())
+        },
+        None => {
+            Err(InternalError::from("Not a file"))
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::open("rplanner.db")?;
 
@@ -238,7 +276,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     rocket::ignite()
         .manage(connection.clone())
-        .mount("/api", routes![notes, add_note, set_note, delete_note])
+        .mount("/api", routes![notes, add_note, set_note, delete_note, upload_image])
         .mount("/images", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/images")).rank(15))
         .mount("/", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/web")))
         .launch();

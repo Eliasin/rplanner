@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Nav } from 'react-bootstrap';
 import { getNotes, Note, NoteID } from './api';
-import { NoteFunctionBar, NoteChangeTimers, Notes } from './notes';
+import { NoteFunctionBar, NoteChangeTimers, Notes, NoteModalState } from './notes';
 
 import './app.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -45,8 +45,8 @@ function createAddSidebar(setSection: (section: Section) => void): (component: J
     };
 }
 
-function addNoteFunctionBar(component: JSX.Element, requestNoteRefresh: () => void): JSX.Element {
-    return <>{component}<NoteFunctionBar requestNoteRefresh={requestNoteRefresh} /></>;
+function addNoteFunctionBar(component: JSX.Element, requestNoteRefresh: () => void, setNoteModalState: (state: NoteModalState) => void): JSX.Element {
+    return <>{component}<NoteFunctionBar requestNoteRefresh={requestNoteRefresh} setNoteModalState={setNoteModalState} /></>;
 }
 
 type AppProps = {
@@ -58,6 +58,7 @@ export function App(props: AppProps) {
     const [notes, setNotes] = useState<Array<[NoteID, Note]>>([]);
     const [needRefresh, setNeedRefresh] = useState(false);
     const noteTimers = props.noteTimers;
+    const [noteModalState, setNoteModalState] = useState<NoteModalState>({ kind: 'closed' });
 
     const requestNoteRefresh = () => {
         setNeedRefresh(true);
@@ -74,7 +75,13 @@ export function App(props: AppProps) {
 
     switch (section) {
             case 'Notes': {
-                return addNoteFunctionBar(addSidebar(<Notes noteChangeTimers={noteTimers} notes={notes} requestNoteRefresh={requestNoteRefresh} />), requestNoteRefresh);
+                return addNoteFunctionBar(addSidebar(<Notes
+                                                     noteChangeTimers={noteTimers}
+                                                     notes={notes}
+                                                     requestNoteRefresh={requestNoteRefresh}
+                                                     noteModalState={noteModalState}
+                                                     setNoteModalState={setNoteModalState}
+                    />), requestNoteRefresh, setNoteModalState);
             }
             case 'Todo': {
                 return addSidebar(<Todo />);

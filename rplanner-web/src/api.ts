@@ -69,3 +69,13 @@ export async function deleteNote(note_id: number) {
         body: JSON.stringify(deleteNoteRequest),
     }));
 }
+
+export async function uploadImage(name: string, file: File) {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    return (await fetch(`/api/upload_image?name=${name}`, {
+        method: 'POST',
+        body: formData
+    }));
+}

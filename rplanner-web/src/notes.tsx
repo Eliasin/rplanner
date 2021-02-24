@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { ListGroup, Button, Modal } from 'react-bootstrap';
-import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote } from './api';
+import React, { useEffect } from 'react';
+import { ListGroup, Button, Modal, Form } from 'react-bootstrap';
+import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
@@ -32,6 +32,7 @@ function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void, 
 
 type NoteFunctionBarProps = {
     requestNoteRefresh: () => void;
+    setNoteModalState: (state: NoteModalState) => void;
 }
 
 export function NoteFunctionBar(props: NoteFunctionBarProps) {
@@ -41,10 +42,8 @@ export function NoteFunctionBar(props: NoteFunctionBarProps) {
                 addNote({ content: [{ Text: 'New note...' }], date: new Date().toUTCString() });
                 props.requestNoteRefresh();
             }}><FontAwesomeIcon icon={faPlus} /></Button></ListGroup.Item>
-            <ListGroup.Item><input id='imgUpload' type='file' /><Button variant="dark" onClick={() => {
-                const inputElement = document.getElementById('imgUpload') as HTMLInputElement;
-
-                inputElement.click();
+            <ListGroup.Item><Button variant="dark" onClick={() => {
+                props.setNoteModalState({ kind: 'image-upload' });
             }}><FontAwesomeIcon icon={faPlus} /><FontAwesomeIcon icon={faImage} /></Button></ListGroup.Item>
         </ListGroup>
     );
@@ -151,30 +150,68 @@ function tickNoteTimers(noteTimers: Map<number, NoteChangeTimer>) {
     }
 }
 
-type NotesProps = {
-    noteChangeTimers: NoteChangeTimers;
-    notes: Array<[NoteID, Note]>;
-    requestNoteRefresh: () => void;
-}
-
 function compareNotes(a: [NoteID, Note], b: [NoteID, Note]): number {
     return a[0] - b[0];
 }
 
-type ImageModalState = { kind: 'open'; id: NoteID } | { kind: 'closed' };
+type ImageModalState = { kind: 'image-open'; id: NoteID };
 
-type ImageModalProps = {
-    state: ImageModalState;
-    hideImageModal: () => void;
+type ImageUploadModalState = { kind: 'image-upload' };
+
+export type NoteModalState = ImageModalState | ImageUploadModalState | { kind: 'closed' };
+
+type NoteModalProps = {
+    state: NoteModalState;
+    hideNoteModal: () => void;
 };
 
-function ImageModal(props: ImageModalProps) {
-    if (props.state.kind === 'open') {
-        const imageModal = <Modal show={props.state.kind === 'open'} onHide={props.hideImageModal}>
-            <Modal.Title>{props.state.id}</Modal.Title>
-            </Modal>;
+type NotesProps = {
+    noteChangeTimers: NoteChangeTimers;
+    notes: Array<[NoteID, Note]>;
+    requestNoteRefresh: () => void;
+    noteModalState: NoteModalState;
+    setNoteModalState: (state: NoteModalState) => void;
+}
 
-        return imageModal;
+function NoteModal(props: NoteModalProps) {
+    switch (props.state.kind) {
+            case 'image-open': {
+                     return <Modal show={true} onHide={props.hideNoteModal}>
+                        <Modal.Title>{props.state.id}</Modal.Title>
+                        </Modal>;
+            }
+            case 'image-upload': {
+                return <Modal show={true} onHide={props.hideNoteModal}>
+                    <Modal.Header>
+                    <Modal.Title>Upload Image</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                    <Form>
+                    <Form.Label>Image File</Form.Label>
+                    <Form.Control type='file' id='imageUploadInput' />
+                    <Form.Label>Save Image as...</Form.Label>
+                    <Form.Control type='text' id='imageUploadFilenameInput' placeholder='Filename...' />
+                    </Form>
+                    </Modal.Body>
+                    <Modal.Footer>
+                    <Button onClick={() => {
+                        const fileInput = document.getElementById('imageUploadInput') as HTMLInputElement;
+                        const fileNameInput = document.getElementById('imageUploadFilenameInput') as HTMLInputElement;
+
+                        const files = fileInput.files;
+                        if (files !== null && files.length > 0) {
+                            const file = files[0];
+
+                            if (fileNameInput.value === '') {
+                                uploadImage(file.name, file);
+                            } else {
+                                uploadImage(fileNameInput.value, file);
+                            }
+                        }
+                    }}>Upload</Button>
+                    </Modal.Footer>
+                    </Modal>;
+            }
     }
 
     return <Modal show={false} />;
@@ -182,9 +219,9 @@ function ImageModal(props: ImageModalProps) {
 
 export function Notes(props: NotesProps) {
     const notes = props.notes;
-    const [imageModalState, setImageModalState] = useState<ImageModalState>({ kind: 'closed' });
     const noteChangeTimers = props.noteChangeTimers;
-    const openImageModal = (id: NoteID) => setImageModalState({ kind: 'open', id, });
+    const { noteModalState, setNoteModalState } = props;
+    const openImageModal = (id: NoteID) => setNoteModalState({ kind: 'image-open', id, });
 
     useEffect(() => {
         updateNoteChangeTimers(notes, noteChangeTimers);
@@ -215,7 +252,7 @@ export function Notes(props: NotesProps) {
             return <>{elem}{parseNote(note, note_id, props.requestNoteRefresh, openImageModal)}</>;
         }, <></>);
 
-        return <><ImageModal state={imageModalState} hideImageModal={() => setImageModalState({kind: 'closed'})} /><div className='notes'>{noteElements}</div></>;
+        return <><NoteModal state={noteModalState} hideNoteModal={() => setNoteModalState({kind: 'closed'})} /><div className='notes'>{noteElements}</div></>;
     } else {
         return <><div className='notes'></div></>;
     }

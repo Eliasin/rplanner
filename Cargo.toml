@@ -13,3 +13,4 @@ rocket_contrib = "0.4.6"
 serde_json = "1.0.61"
 serde = { version = "1.0", features = ["derive"] }
 chrono = "0.4.19"
+rocket-multipart-form-data = "0.9.6"
