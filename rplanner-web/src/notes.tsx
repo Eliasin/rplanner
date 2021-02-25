@@ -129,7 +129,14 @@ function createNoteEnterListener(noteTimers: NoteChangeTimers): (e: Event) => vo
             }
 
             const noteElement = e.target as HTMLElement;
-            noteElement.textContent += '\n';
+            const noteText = noteElement.textContent;
+
+            if (noteText) {
+                const startText = noteText.slice(0, anchorOffset);
+                const endText = noteText.slice(anchorOffset)
+                noteElement.textContent = startText + '\n' + endText;
+
+            }
 
             if (selection && anchorNode && noteElement) {
                 const range = document.createRange();
@@ -148,6 +155,8 @@ function createNoteEventListener(noteTimers: NoteChangeTimers): (e: Event) => vo
         if (e.type !== 'input') {
             return;
         }
+
+        console.log(getCaretPosition())
 
         const noteElement = e.target as HTMLElement;
         resetNoteElementChangeTimer(noteElement, noteTimers);
@@ -301,21 +310,36 @@ type CaretPosition = {
     index: number;
 }
 
-function getCaretPosition(): CaretPosition {
+function getCaretPosition(): CaretPosition | null {
     const selection = window.getSelection();
+    if (!selection) {
+        return null;
+    }
 
-    const anchorNode = selection?.anchorNode;
-    const focusNode = selection?.focusNode;
+    const anchorNode = selection.anchorNode;
+    if (!anchorNode) {
+        return null;
+    }
 
-    if (anchorNode?.nodeName === 'div' && anchorNode.nodeType === Node.ELEMENT_NODE) {
-        const fragmentNum = (anchorNode as HTMLElement).dataset['order'];
+    const anchorOffset = selection.anchorOffset;
+
+    const noteElement = anchorNode.parentElement as HTMLElement;
+    const noteID = getNoteElementID(noteElement);
+
+    if (noteID === null) {
+        return null;
+    }
+
+    const fragmentNum = noteElement.dataset['order'];
+    if (fragmentNum === undefined) {
+        return null;
     }
 
     return {
-        noteID: 0,
-        fragmentNum: 0,
-        index: 0
-    }
+        noteID,
+        fragmentNum: parseInt(fragmentNum),
+        index: anchorOffset
+    };
 }
 
 export function Notes(props: NotesProps) {
