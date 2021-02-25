@@ -26,9 +26,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                                endpoints::set_note,
                                endpoints::add_note,
                                endpoints::delete_note,
-                               endpoints::upload_image])
-        .mount("/images", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/images")).rank(15))
-        .mount("/", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/web")))
+                               endpoints::upload_image,
+                               endpoints::get_image_list,
+        ])
+        .mount("/images", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/images")))
+        .mount("/", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/web")).rank(15))
         .launch();
 
     Ok(())

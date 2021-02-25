@@ -79,3 +79,13 @@ export async function uploadImage(name: string, file: File) {
         body: formData
     }));
 }
+
+export type GetImageListResponse = {
+    images: Array<string>;
+};
+
+export async function getImageList(): Promise<GetImageListResponse> {
+    return (await fetch('/api/get_image_list', {
+        method: 'GET'
+    })).json();
+}

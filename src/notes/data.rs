@@ -43,3 +43,8 @@ pub struct SetNoteRequest {
 pub struct DeleteNoteRequest {
     pub note_id: i64,
 }
+
+#[derive(Serialize, Debug)]
+pub struct ImageListResponse {
+    pub images: Vec<String>,
+}

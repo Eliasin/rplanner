@@ -1,31 +1,35 @@
-import React, { useEffect } from 'react';
-import { ListGroup, Button, Modal, Form } from 'react-bootstrap';
-import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage } from './api';
+import React, { useEffect, useState } from 'react';
+import { ListGroup, Button, Modal, Form, Image } from 'react-bootstrap';
+import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
-function createFragmentElement(fragment: NoteFragment): JSX.Element {
+function createFragmentElement(fragment: NoteFragment, noteID: NoteID, order: number): JSX.Element {
     if ("Text" in fragment) {
-        return <div children={fragment.Text} />;
+        return <div className='note-text' children={fragment.Text} data-order={order} data-note-id={noteID} contentEditable/>;
     } else if ("Image" in fragment) {
-        return <img src={fragment.Image} alt='Note' />;
+        return <img src={fragment.Image} data-order={order} alt='Note' />;
     }
 
     return <p />;
 }
 
-function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void, openImageModal: (noteID: NoteID) => void): JSX.Element {
-    let contents = note.content.reduce((elem: JSX.Element, fragment: NoteFragment) => {
-        return <>{elem}{createFragmentElement(fragment)}</>;
-    }, <></>);
+function parseNote(note: Note, note_id: NoteID, requestNoteRefresh: () => void, openImageModal: () => void): JSX.Element {
+    let contents = <></>;
+
+    for (let i = 0; i < note.content.length; i++) {
+        const fragment = note.content[i];
+        const fragmentElement = createFragmentElement(fragment, note_id, i);
+        contents = <>{contents}{fragmentElement}</>;
+    }
 
     const noteElement =
-        <div id={'note-' + note_id} className='note' data-note-id={note_id} contentEditable>{contents}</div>;
+        <div id={'note-' + note_id} className='note' data-note-id={note_id} >{contents}</div>;
     const deleteButton = <Button size='sm' className='noteDelete' variant='danger' onClick={() => {
         deleteNote(note_id);
         requestNoteRefresh();
     }}><FontAwesomeIcon icon={faTimes} size='sm' /></Button>;
-    const addImageButton = <Button className='noteImage' size='sm' onClick={() => openImageModal(note_id)}><FontAwesomeIcon icon={faImage} size='sm'/></Button>;
+    const addImageButton = <Button className='noteImage' size='sm' onClick={() => openImageModal()}><FontAwesomeIcon icon={faImage} size='sm'/></Button>;
 
     return <div className='noteBlock'>{addImageButton}{deleteButton}{noteElement}</div>;
 }
@@ -86,21 +90,67 @@ function flushNoteChanges(noteElement: HTMLElement) {
     setNote(noteID, note);
 }
 
-function createNoteInputEventListener(noteTimers: NoteChangeTimers): (e: Event) => void {
-    return (e: Event) => {
-        const noteElement = e.target as HTMLElement;
+function getNoteElementID(noteElement: HTMLElement): NoteID | null {
+    if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
+        return null;
+    }
 
-        if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
-            return;
-        }
+    const noteID = parseInt(noteElement.dataset['noteId']);
 
-        const noteID = parseInt(noteElement.dataset['noteId']);
+    if (isNaN(noteID)) {
+        return null;
+    }
 
-        if (isNaN(noteID)) {
-            return;
-        }
+    return noteID;
+}
 
+function resetNoteElementChangeTimer(noteElement: HTMLElement, noteTimers: NoteChangeTimers) {
+    const noteID = getNoteElementID(noteElement);
+    if (noteID !== null) {
         resetNoteChangeTimer(noteID, noteTimers);
+    }
+}
+
+function createNoteEnterListener(noteTimers: NoteChangeTimers): (e: Event) => void {
+    return (e: Event) => {
+        if (e.type !== 'keydown') {
+            return;
+        }
+
+        if ((e as KeyboardEvent).key === "Enter") {
+            e.preventDefault();
+
+            const selection = window.getSelection();
+            let anchorNode = null;
+            let anchorOffset = 0;
+            if (selection) {
+                anchorNode = selection.anchorNode;
+                anchorOffset = selection.anchorOffset;
+            }
+
+            const noteElement = e.target as HTMLElement;
+            noteElement.textContent += '\n';
+
+            if (selection && anchorNode && noteElement) {
+                const range = document.createRange();
+                range.setStart(noteElement.childNodes[0], anchorOffset + 1);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+
+            resetNoteElementChangeTimer(noteElement, noteTimers);
+        }
+    };
+}
+
+function createNoteEventListener(noteTimers: NoteChangeTimers): (e: Event) => void {
+    return (e: Event) => {
+        if (e.type !== 'input') {
+            return;
+        }
+
+        const noteElement = e.target as HTMLElement;
+        resetNoteElementChangeTimer(noteElement, noteTimers);
     };
 }
 
@@ -154,7 +204,7 @@ function compareNotes(a: [NoteID, Note], b: [NoteID, Note]): number {
     return a[0] - b[0];
 }
 
-type ImageModalState = { kind: 'image-open'; id: NoteID };
+type ImageModalState = { kind: 'image-open'; };
 
 type ImageUploadModalState = { kind: 'image-upload' };
 
@@ -173,11 +223,37 @@ type NotesProps = {
     setNoteModalState: (state: NoteModalState) => void;
 }
 
+function ImageViewer() {
+    const [imageNames, setImageNames] = useState<Array<string>>([]);
+
+    useEffect(() => {
+        getImageList().then((response: GetImageListResponse) => {
+            setImageNames(response.images);
+        });
+    }, [setImageNames]);
+
+    if (imageNames.length > 0) {
+        const imageElements = imageNames.reduce((elem: JSX.Element, name: string) => {
+            return <>{elem}
+                <button className='image-selection'><Image className='image-thumbnail' src={`images/${name}`} alt={`Thumbnail of ${name}`} thumbnail /></button>
+                </>;
+        }, <></>);
+
+        return <div className='image-viewer'>{imageElements}</div>;
+    }
+
+    return <div className='image-viewer'/>;
+
+}
+
 function NoteModal(props: NoteModalProps) {
     switch (props.state.kind) {
             case 'image-open': {
-                     return <Modal show={true} onHide={props.hideNoteModal}>
-                        <Modal.Title>{props.state.id}</Modal.Title>
+                return <Modal dialogClassName='image-open-modal' contentClassName='image-open-modal' show={true} onHide={props.hideNoteModal}>
+                        <Modal.Title>Select an Image</Modal.Title>
+                        <Modal.Body>
+                        <ImageViewer />
+                        </Modal.Body>
                         </Modal>;
             }
             case 'image-upload': {
@@ -207,7 +283,9 @@ function NoteModal(props: NoteModalProps) {
                             } else {
                                 uploadImage(fileNameInput.value, file);
                             }
+                            props.hideNoteModal();
                         }
+
                     }}>Upload</Button>
                     </Modal.Footer>
                     </Modal>;
@@ -217,11 +295,34 @@ function NoteModal(props: NoteModalProps) {
     return <Modal show={false} />;
 }
 
+type CaretPosition = {
+    noteID: NoteID;
+    fragmentNum: number;
+    index: number;
+}
+
+function getCaretPosition(): CaretPosition {
+    const selection = window.getSelection();
+
+    const anchorNode = selection?.anchorNode;
+    const focusNode = selection?.focusNode;
+
+    if (anchorNode?.nodeName === 'div' && anchorNode.nodeType === Node.ELEMENT_NODE) {
+        const fragmentNum = (anchorNode as HTMLElement).dataset['order'];
+    }
+
+    return {
+        noteID: 0,
+        fragmentNum: 0,
+        index: 0
+    }
+}
+
 export function Notes(props: NotesProps) {
     const notes = props.notes;
     const noteChangeTimers = props.noteChangeTimers;
     const { noteModalState, setNoteModalState } = props;
-    const openImageModal = (id: NoteID) => setNoteModalState({ kind: 'image-open', id, });
+    const openImageModal = () => setNoteModalState({ kind: 'image-open' });
 
     useEffect(() => {
         updateNoteChangeTimers(notes, noteChangeTimers);
@@ -236,12 +337,15 @@ export function Notes(props: NotesProps) {
     }, [notes, noteChangeTimers]);
 
     useEffect(() => {
-        let noteElements = Array.from(document.getElementsByClassName('note'));
+        let noteElements = Array.from(document.getElementsByClassName('note-text'));
 
-        const noteInputEventListener = createNoteInputEventListener(noteChangeTimers);
+        const noteEventListener = createNoteEventListener(noteChangeTimers);
+        const noteEnterListener = createNoteEnterListener(noteChangeTimers);
         for (const element of noteElements) {
-            element.removeEventListener('input', noteInputEventListener);
-            element.addEventListener('input', noteInputEventListener);
+            element.removeEventListener('input', noteEventListener);
+            element.removeEventListener('keydown', noteEnterListener);
+            element.addEventListener('input', noteEventListener);
+            element.addEventListener('keydown', noteEnterListener);
         }
     }, [notes, noteChangeTimers]);
 

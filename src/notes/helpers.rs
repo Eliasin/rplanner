@@ -3,7 +3,7 @@ use chrono::offset::Utc;
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::fs::File;
+use std::fs::{ File, read_dir };
 use std::io;
 use std::io::Write;
 
@@ -126,4 +126,21 @@ pub fn write_data_to_disk(path: &Path, data: &Vec<u8>) -> io::Result<()> {
 
     file.write(data)?;
     Ok(())
+}
+
+pub fn validate_path_is_in_image_folder(path: &Path) -> bool {
+    match path.parent() {
+        Some(parent) => parent == Path::new("images/"),
+        None => false
+    }
+}
+
+pub fn get_image_filenames() -> InternalResult<Vec<String>> {
+    let image_files: Vec<String> = read_dir(Path::new("images/"))?.filter_map(|dir_entry| {
+        match dir_entry {
+            Ok(v) => Some(v.path().file_name()?.to_string_lossy().to_string()),
+            Err(_) => None,
+        }
+    }).collect();
+    Ok(image_files)
 }

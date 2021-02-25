@@ -1,4 +1,4 @@
-use rusqlite::{ NO_PARAMS };
+use rusqlite::NO_PARAMS;
 use rocket::{ State, Data, post, get };
 use rocket::http::ContentType;
 use rocket_multipart_form_data::{ MultipartFormDataOptions, MultipartFormData, mime, MultipartFormDataField };
@@ -90,12 +90,28 @@ pub fn upload_image(name: String, content_type: &ContentType, data: Data) -> Int
             let raw = image.remove(0);
 
             let data = raw.raw;
+            let image_folder_path = Path::new("images");
 
-            write_data_to_disk(&Path::new("images").join(Path::new(&name)), &data)?;
-            Ok(())
+            let image_file_path = image_folder_path.join(Path::new(&name));
+            if validate_path_is_in_image_folder(&image_file_path) {
+                write_data_to_disk(&image_file_path, &data)?;
+                Ok(())
+            } else {
+                Err(InternalError::from("Invalid image name"))
+            }
+
         },
         None => {
             Err(InternalError::from("Not a file"))
         }
     }
+}
+
+#[get("/get_image_list")]
+pub fn get_image_list() -> InternalResult<Json<ImageListResponse>> {
+    let images = ImageListResponse {
+        images: get_image_filenames()?,
+    };
+
+    Ok(Json(images))
 }
