@@ -1,4 +1,4 @@
-use rusqlite::{ Connection, params, Row };
+use rusqlite::{ Connection, params, Row, NO_PARAMS };
 use chrono::offset::Utc;
 
 use std::collections::HashMap;
@@ -165,4 +165,102 @@ pub fn insert_image_into_note(note: &mut Note, fragment_num: FragmentNum, index:
             Err(InternalError::from("Invalid note index"))
         }
     }
+}
+
+pub fn remove_fragment_from_note(note: &mut Note, fragment_num: FragmentNum) -> InternalResult<()> {
+    if note.content.len() < fragment_num as usize {
+        return Err(InternalError::from("Invalid fragment number"));
+    }
+
+    note.content.remove(fragment_num as usize);
+
+    let previous_fragment = note.content.get(fragment_num as usize);
+    let next_fragment = note.content.get((fragment_num + 1) as usize);
+
+    if previous_fragment.is_some() && next_fragment.is_some() {
+        let previous_fragment = previous_fragment.unwrap();
+        let next_fragment = next_fragment.unwrap();
+
+        match previous_fragment {
+            NoteElement::Text(prev_text) => {
+                match next_fragment {
+                    NoteElement::Text(next_text) => {
+                        let new_text = format!("{}{}", prev_text, next_text);
+
+                        note.content.remove(fragment_num as usize);
+                        note.content.remove((fragment_num + 1) as usize);
+                        note.content.insert(fragment_num as usize, NoteElement::Text(new_text));
+                    },
+                    _ => {}
+                }
+            },
+            _ => {}
+        };
+    }
+
+    Ok(())
+}
+
+pub fn get_note_from_db(note_id: NoteID, db_connection: &Connection) -> InternalResult<Note> {
+    let mut note_statement = db_connection.prepare("SELECT rowid, date FROM notes WHERE rowid = (?1)")?;
+    let mut date_map = HashMap::new();
+
+    note_statement.query_map(params![note_id], |row| {
+        add_note_date(&mut date_map, &row);
+        Ok(())
+    })?.next();
+
+    let mut text_statement = db_connection.prepare("SELECT note_id, content, num FROM note_text_elements WHERE note_id = (?1)")?;
+    let mut image_statement = db_connection.prepare("SELECT note_id, path, num FROM note_image_elements WHERE note_id = (?1)")?;
+
+    let mut note_fragments = FragmentMap::new();
+    let mut rows = text_statement.query(params![note_id])?;
+
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Text);
+    }
+
+    let mut rows = image_statement.query(params![note_id])?;
+
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Image);
+    }
+
+    let mut notes = construct_notes(&mut note_fragments, &date_map);
+
+    if notes.len() != 1 {
+        return Err(InternalError::from("Could not construct note"));
+    }
+
+    let (_, note) = notes.remove(0);
+
+    Ok(note)
+}
+
+pub fn get_all_notes_from_db(db_connection: &Connection) -> InternalResult<Vec<(NoteID, Note)>> {
+    let mut note_statement = db_connection.prepare("SELECT rowid, date FROM notes")?;
+    let mut date_map = HashMap::new();
+
+    note_statement.query_map(NO_PARAMS, |row| {
+        add_note_date(&mut date_map, &row);
+        Ok(())
+    })?.next();
+
+    let mut text_statement = db_connection.prepare("SELECT note_id, content, num FROM note_text_elements")?;
+    let mut image_statement = db_connection.prepare("SELECT note_id, path, num FROM note_image_elements")?;
+
+    let mut note_fragments = FragmentMap::new();
+    let mut rows = text_statement.query(NO_PARAMS)?;
+
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Text);
+    }
+
+    let mut rows = image_statement.query(NO_PARAMS)?;
+
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Image);
+    }
+
+    Ok(construct_notes(&mut note_fragments, &date_map))
 }

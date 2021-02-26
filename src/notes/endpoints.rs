@@ -1,10 +1,8 @@
-use rusqlite::{ NO_PARAMS, params };
 use rocket::{ State, Data, post, get };
 use rocket::http::ContentType;
 use rocket_multipart_form_data::{ MultipartFormDataOptions, MultipartFormData, mime, MultipartFormDataField };
 use rocket_contrib::json::Json;
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use crate::internal_error::{ InternalResult, InternalError };
@@ -16,31 +14,9 @@ use super::data::*;
 pub fn get_notes(db_connection: State<DBConnection>) -> InternalResult<Json<Vec<(NoteID, Note)>>> {
     let db_connection = db_connection.lock()?;
 
-    let mut note_statement = db_connection.prepare("SELECT rowid, date FROM notes")?;
-    let mut date_map = HashMap::new();
+    let notes = get_all_notes_from_db(&db_connection)?;
 
-    note_statement.query_map(NO_PARAMS, |row| {
-        add_note_date(&mut date_map, &row);
-        Ok(())
-    })?.next();
-
-    let mut text_statement = db_connection.prepare("SELECT note_id, content, num FROM note_text_elements")?;
-    let mut image_statement = db_connection.prepare("SELECT note_id, path, num FROM note_image_elements")?;
-
-    let mut note_fragments = FragmentMap::new();
-    let mut rows = text_statement.query(NO_PARAMS)?;
-
-    while let Some(row) = rows.next()? {
-        add_fragment(&mut note_fragments, row, FragmentTag::Text);
-    }
-
-    let mut rows = image_statement.query(NO_PARAMS)?;
-
-    while let Some(row) = rows.next()? {
-        add_fragment(&mut note_fragments, row, FragmentTag::Image);
-    }
-
-    Ok(Json(construct_notes(&mut note_fragments, &date_map)))
+    Ok(Json(notes))
 }
 
 #[post("/add_note", format = "json", data = "<note>")]
@@ -120,41 +96,23 @@ pub fn get_image_list() -> InternalResult<Json<ImageListResponse>> {
 pub fn insert_image(insert_image_request: Json<InsertImageRequest>, db_connection: State<DBConnection>) -> InternalResult<()> {
     let db_connection = db_connection.lock()?;
 
-    let mut note_statement = db_connection.prepare("SELECT rowid, date FROM notes WHERE rowid = (?1)")?;
-    let mut date_map = HashMap::new();
+    let mut note = get_note_from_db(insert_image_request.note_id, &db_connection)?;
 
-    note_statement.query_map(params![insert_image_request.note_id], |row| {
-        add_note_date(&mut date_map, &row);
-        Ok(())
-    })?.next();
+    insert_image_into_note(&mut note, insert_image_request.fragment_num, insert_image_request.index, &insert_image_request.image_name)?;
+    delete_note_contents_from_db(insert_image_request.note_id, &db_connection)?;
 
-    let mut text_statement = db_connection.prepare("SELECT note_id, content, num FROM note_text_elements WHERE note_id = (?1)")?;
-    let mut image_statement = db_connection.prepare("SELECT note_id, path, num FROM note_image_elements WHERE note_id = (?1)")?;
+    add_note_contents_to_db(insert_image_request.note_id, note.content.clone().into_iter(), &*db_connection)?;
 
-    let mut note_fragments = FragmentMap::new();
-    let mut rows = text_statement.query(params![insert_image_request.note_id])?;
+    Ok(())
 
-    while let Some(row) = rows.next()? {
-        add_fragment(&mut note_fragments, row, FragmentTag::Text);
-    }
+}
 
-    let mut rows = image_statement.query(params![insert_image_request.note_id])?;
+#[post("/delete_fragment", format = "json", data = "<delete_fragment_request>")]
+pub fn delete_fragment(delete_fragment_request: Json<DeleteFragmentRequest>, db_connection: State<DBConnection>) -> InternalResult<()> {
+    let db_connection = db_connection.lock()?;
 
-    while let Some(row) = rows.next()? {
-        add_fragment(&mut note_fragments, row, FragmentTag::Image);
-    }
+    let mut note = get_note_from_db(delete_fragment_request.note_id, &db_connection)?;
+    remove_fragment_from_note(&mut note, delete_fragment_request.fragment_num)?;
 
-    let mut notes = construct_notes(&mut note_fragments, &date_map);
-
-    match notes.get_mut(0) {
-        Some((_, note)) => {
-            insert_image_into_note(note, insert_image_request.fragment_num, insert_image_request.index, &insert_image_request.image_name)?;
-            delete_note_contents_from_db(insert_image_request.note_id, &db_connection)?;
-
-            add_note_contents_to_db(insert_image_request.note_id, note.content.clone().into_iter(), &*db_connection)?;
-
-            Ok(())
-        },
-        None => Err(InternalError::from("Cannot construct note"))
-    }
+    Ok(())
 }

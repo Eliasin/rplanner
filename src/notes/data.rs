@@ -56,3 +56,9 @@ pub struct InsertImageRequest {
     pub index: usize,
     pub image_name: String,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct DeleteFragmentRequest {
+    pub note_id: NoteID,
+    pub fragment_num: FragmentNum,
+}

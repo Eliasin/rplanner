@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ListGroup, Button, Modal, Form, Image } from 'react-bootstrap';
-import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse, insertImageIntoNote } from './api';
+import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse, insertImageIntoNote, FragmentNum } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
@@ -111,41 +111,108 @@ function resetNoteElementChangeTimer(noteElement: HTMLElement, noteTimers: NoteC
     }
 }
 
-function createNoteEnterListener(noteTimers: NoteChangeTimers): (e: Event) => void {
+function handleEnterKeyInNote(noteTimers: NoteChangeTimers, e: Event) {
+    e.preventDefault();
+
+    const selection = window.getSelection();
+    let anchorNode = null;
+    let anchorOffset = 0;
+    if (selection) {
+        anchorNode = selection.anchorNode;
+        anchorOffset = selection.anchorOffset;
+    }
+
+    const noteElement = e.target as HTMLElement;
+    const noteText = noteElement.textContent;
+
+    if (noteText) {
+        const startText = noteText.slice(0, anchorOffset);
+        const endText = noteText.slice(anchorOffset)
+        noteElement.textContent = startText + '\n' + endText;
+
+    }
+
+    if (selection && anchorNode && noteElement) {
+        const range = document.createRange();
+        range.setStart(noteElement.childNodes[0], anchorOffset + 1);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    resetNoteElementChangeTimer(noteElement, noteTimers);
+}
+
+function moveCaretPositionIntoNote(position: CaretPosition) {
+
+}
+
+function getLastTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): FragmentNum | null {
+    if (noteID > notes.length) {
+        return null;
+    }
+
+    const [, note] = notes[noteID];
+    for (let index = 0; index < note.content.length; index++) {
+        const fragment = note.content[index];
+        if ('Text' in fragment) {
+            return index;
+        }
+    }
+
+    return null;
+}
+
+function getFragmentLength(note: Note, fragmentNum: FragmentNum): number | null {
+    if (note.content.length <= fragmentNum) {
+        return null;
+    }
+
+    const fragment = note.content[fragmentNum];
+
+    if ('Text' in fragment) {
+        return fragment.Text.length;
+    }
+
+    return null;
+}
+
+function handleUpArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
+    const position = getCaretPosition();
+    const noteID = getNoteElementID(e.target as HTMLElement);
+
+    if (position && noteID) {
+        const atBeginningOfFragment = position.index === 0;
+        const thereIsAPreviousFragment = position.fragmentNum !== 0;
+
+        if (atBeginningOfFragment && thereIsAPreviousFragment) {
+            const lastTextFragmentNum = getLastTextFragmentNum(noteID, notes);
+
+            if (lastTextFragmentNum) {
+                const [, note] = notes[noteID];
+                const fragmentLength = getFragmentLength(note, lastTextFragmentNum);
+                if (fragmentLength && fragmentLength > 0) {
+                    moveCaretPositionIntoNote({
+                        noteID,
+                        fragmentNum: lastTextFragmentNum,
+                        index: fragmentLength - 1,
+                    });
+                }
+            }
+        }
+
+    }
+}
+
+function createNoteKeyListener(noteTimers: NoteChangeTimers, notes: Array<[NoteID, Note]>): (e: Event) => void {
     return (e: Event) => {
         if (e.type !== 'keydown') {
             return;
         }
 
         if ((e as KeyboardEvent).key === "Enter") {
-            e.preventDefault();
-
-            const selection = window.getSelection();
-            let anchorNode = null;
-            let anchorOffset = 0;
-            if (selection) {
-                anchorNode = selection.anchorNode;
-                anchorOffset = selection.anchorOffset;
-            }
-
-            const noteElement = e.target as HTMLElement;
-            const noteText = noteElement.textContent;
-
-            if (noteText) {
-                const startText = noteText.slice(0, anchorOffset);
-                const endText = noteText.slice(anchorOffset)
-                noteElement.textContent = startText + '\n' + endText;
-
-            }
-
-            if (selection && anchorNode && noteElement) {
-                const range = document.createRange();
-                range.setStart(noteElement.childNodes[0], anchorOffset + 1);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-
-            resetNoteElementChangeTimer(noteElement, noteTimers);
+            handleEnterKeyInNote(noteTimers, e);
+        } else if ((e as KeyboardEvent).key === 'ArrowUp') {
+            handleUpArrowInNote(e, notes);
         }
     };
 }
@@ -329,7 +396,7 @@ function NoteModal(props: NoteModalProps) {
 
 type CaretPosition = {
     noteID: NoteID;
-    fragmentNum: number;
+    fragmentNum: FragmentNum;
     index: number;
 }
 
@@ -387,7 +454,7 @@ export function Notes(props: NotesProps) {
         let noteElements = Array.from(document.getElementsByClassName('note-text'));
 
         const noteEventListener = createNoteEventListener(noteChangeTimers);
-        const noteEnterListener = createNoteEnterListener(noteChangeTimers);
+        const noteEnterListener = createNoteKeyListener(noteChangeTimers, notes);
         for (const element of noteElements) {
             element.removeEventListener('input', noteEventListener);
             element.removeEventListener('keydown', noteEnterListener);

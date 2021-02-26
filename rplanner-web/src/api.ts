@@ -14,6 +14,7 @@ export type Note = {
 }
 
 export type NoteID = number;
+export type FragmentNum = number;
 export async function getNotes(): Promise<Array<[NoteID, Note]>> {
     return (await fetch('/api/get_notes')).json();
 }
