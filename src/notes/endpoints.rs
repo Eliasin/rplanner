@@ -1,4 +1,4 @@
-use rusqlite::NO_PARAMS;
+use rusqlite::{ NO_PARAMS, params };
 use rocket::{ State, Data, post, get };
 use rocket::http::ContentType;
 use rocket_multipart_form_data::{ MultipartFormDataOptions, MultipartFormData, mime, MultipartFormDataField };
@@ -75,7 +75,7 @@ pub fn delete_note(delete_note_request: Json<DeleteNoteRequest>, db_connection: 
     Ok(())
 }
 
-#[post("/upload_image?<name>", format="multipart/form-data", data="<data>")]
+#[post("/upload_image?<name>", format = "multipart/form-data", data="<data>")]
 pub fn upload_image(name: String, content_type: &ContentType, data: Data) -> InternalResult<()> {
     let options = MultipartFormDataOptions::with_multipart_form_data_fields(vec![
         MultipartFormDataField::raw("image").size_limit(32 * 1024 * 1024).content_type_by_string(Some(mime::IMAGE_STAR)).unwrap()
@@ -114,4 +114,47 @@ pub fn get_image_list() -> InternalResult<Json<ImageListResponse>> {
     };
 
     Ok(Json(images))
+}
+
+#[post("/insert_image", format = "json", data = "<insert_image_request>")]
+pub fn insert_image(insert_image_request: Json<InsertImageRequest>, db_connection: State<DBConnection>) -> InternalResult<()> {
+    let db_connection = db_connection.lock()?;
+
+    let mut note_statement = db_connection.prepare("SELECT rowid, date FROM notes WHERE rowid = (?1)")?;
+    let mut date_map = HashMap::new();
+
+    note_statement.query_map(params![insert_image_request.note_id], |row| {
+        add_note_date(&mut date_map, &row);
+        Ok(())
+    })?.next();
+
+    let mut text_statement = db_connection.prepare("SELECT note_id, content, num FROM note_text_elements WHERE note_id = (?1)")?;
+    let mut image_statement = db_connection.prepare("SELECT note_id, path, num FROM note_image_elements WHERE note_id = (?1)")?;
+
+    let mut note_fragments = FragmentMap::new();
+    let mut rows = text_statement.query(params![insert_image_request.note_id])?;
+
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Text);
+    }
+
+    let mut rows = image_statement.query(params![insert_image_request.note_id])?;
+
+    while let Some(row) = rows.next()? {
+        add_fragment(&mut note_fragments, row, FragmentTag::Image);
+    }
+
+    let mut notes = construct_notes(&mut note_fragments, &date_map);
+
+    match notes.get_mut(0) {
+        Some((_, note)) => {
+            insert_image_into_note(note, insert_image_request.fragment_num, insert_image_request.index, &insert_image_request.image_name)?;
+            delete_note_contents_from_db(insert_image_request.note_id, &db_connection)?;
+
+            add_note_contents_to_db(insert_image_request.note_id, note.content.clone().into_iter(), &*db_connection)?;
+
+            Ok(())
+        },
+        None => Err(InternalError::from("Cannot construct note"))
+    }
 }

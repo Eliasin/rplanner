@@ -28,6 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                endpoints::delete_note,
                                endpoints::upload_image,
                                endpoints::get_image_list,
+                               endpoints::insert_image,
         ])
         .mount("/images", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/images")))
         .mount("/", StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/web")).rank(15))

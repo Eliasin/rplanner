@@ -89,3 +89,27 @@ export async function getImageList(): Promise<GetImageListResponse> {
         method: 'GET'
     })).json();
 }
+
+export type InsertImageRequest = {
+    note_id: number;
+    fragment_num: number;
+    index: number;
+    image_name: string;
+}
+
+export async function insertImageIntoNote(note_id: number, fragment_num: number, index: number, image_name: string) {
+    const insertImageRequest: InsertImageRequest = {
+        note_id,
+        fragment_num,
+        index,
+        image_name,
+    };
+
+    return (await fetch('/api/insert_image', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(insertImageRequest),
+    }));
+}

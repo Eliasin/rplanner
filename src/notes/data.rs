@@ -48,3 +48,11 @@ pub struct DeleteNoteRequest {
 pub struct ImageListResponse {
     pub images: Vec<String>,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct InsertImageRequest {
+    pub note_id: NoteID,
+    pub fragment_num: FragmentNum,
+    pub index: usize,
+    pub image_name: String,
+}

@@ -7,7 +7,7 @@ use std::fs::{ File, read_dir };
 use std::io;
 use std::io::Write;
 
-use crate::internal_error::InternalResult;
+use crate::internal_error::{ InternalResult, InternalError };
 
 use super::data::*;
 
@@ -120,7 +120,6 @@ pub fn delete_note_from_db(note_id: NoteID, db_connection: &Connection) -> Inter
     Ok(())
 }
 
-
 pub fn write_data_to_disk(path: &Path, data: &Vec<u8>) -> io::Result<()> {
     let mut file = File::create(path)?;
 
@@ -143,4 +142,27 @@ pub fn get_image_filenames() -> InternalResult<Vec<String>> {
         }
     }).collect();
     Ok(image_files)
+}
+
+pub fn insert_image_into_note(note: &mut Note, fragment_num: FragmentNum, index: usize, image_path: &String) -> InternalResult<()> {
+    match note.content.get_mut(fragment_num as usize) {
+        Some(note_element) => {
+            match note_element {
+                NoteElement::Text(text) => {
+                    let text_after = text.split_off(index);
+
+                    note.content.insert((fragment_num + 1) as usize, NoteElement::Image(image_path.clone()));
+                    note.content.insert((fragment_num + 2) as usize, NoteElement::Text(text_after));
+
+                    Ok(())
+                },
+                NoteElement::Image(_) => {
+                    Err(InternalError::from("Cannot insert image into middle of image fragment"))
+                }
+            }
+        },
+        None => {
+            Err(InternalError::from("Invalid note index"))
+        }
+    }
 }

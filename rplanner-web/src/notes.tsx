@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ListGroup, Button, Modal, Form, Image } from 'react-bootstrap';
-import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse } from './api';
+import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse, insertImageIntoNote } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
@@ -8,7 +8,7 @@ function createFragmentElement(fragment: NoteFragment, noteID: NoteID, order: nu
     if ("Text" in fragment) {
         return <div className='note-text' children={fragment.Text} data-order={order} data-note-id={noteID} contentEditable/>;
     } else if ("Image" in fragment) {
-        return <img src={fragment.Image} data-order={order} alt='Note' />;
+        return <img className='note-image' src={`images/${fragment.Image}`} data-order={order} alt='Note' />;
     }
 
     return <p />;
@@ -67,15 +67,15 @@ function resetNoteChangeTimer(noteID: NoteID, noteTimers: NoteChangeTimers) {
     }
 }
 
-function flushNoteChanges(noteElement: HTMLElement) {
+function flushNoteChanges(noteElement: HTMLElement): Promise<void> {
     if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
-        return;
+        return Promise.resolve();
     }
 
     const noteID = parseInt(noteElement.dataset['noteId']);
 
     if (isNaN(noteID)) {
-        return;
+        return Promise.resolve();
     }
 
     const textFragment: TextNote = {
@@ -87,7 +87,7 @@ function flushNoteChanges(noteElement: HTMLElement) {
         date: new Date().toUTCString()
     };
 
-    setNote(noteID, note);
+    return setNote(noteID, note).then(() => {});
 }
 
 function getNoteElementID(noteElement: HTMLElement): NoteID | null {
@@ -156,8 +156,6 @@ function createNoteEventListener(noteTimers: NoteChangeTimers): (e: Event) => vo
             return;
         }
 
-        console.log(getCaretPosition())
-
         const noteElement = e.target as HTMLElement;
         resetNoteElementChangeTimer(noteElement, noteTimers);
     };
@@ -221,6 +219,7 @@ export type NoteModalState = ImageModalState | ImageUploadModalState | { kind: '
 
 type NoteModalProps = {
     state: NoteModalState;
+    requestNoteRefresh: () => void;
     hideNoteModal: () => void;
 };
 
@@ -232,7 +231,28 @@ type NotesProps = {
     setNoteModalState: (state: NoteModalState) => void;
 }
 
-function ImageViewer() {
+function insertImageAtCaret(image: string) {
+    const caretPosition = getCaretPosition();
+    if (!caretPosition) {
+        return;
+    }
+
+    const { noteID, fragmentNum, index } = caretPosition;
+
+    const noteElement = document.getElementById(`note-${noteID}`);
+
+    if (noteElement) {
+        flushNoteChanges(noteElement).then(() => {
+            insertImageIntoNote(noteID, fragmentNum, index, image);
+        });
+    }
+}
+
+type ImageViewerProps = {
+    requestNoteRefresh: () => void;
+};
+
+function ImageViewer(props: ImageViewerProps) {
     const [imageNames, setImageNames] = useState<Array<string>>([]);
 
     useEffect(() => {
@@ -244,7 +264,10 @@ function ImageViewer() {
     if (imageNames.length > 0) {
         const imageElements = imageNames.reduce((elem: JSX.Element, name: string) => {
             return <>{elem}
-                <button className='image-selection'><Image className='image-thumbnail' src={`images/${name}`} alt={`Thumbnail of ${name}`} thumbnail /></button>
+                <button className='image-selection' onClick={() => {
+                    insertImageAtCaret(name);
+                    props.requestNoteRefresh();
+                }}><Image className='image-thumbnail' src={`images/${name}`} alt={`Thumbnail of ${name}`} thumbnail /></button>
                 </>;
         }, <></>);
 
@@ -261,7 +284,7 @@ function NoteModal(props: NoteModalProps) {
                 return <Modal dialogClassName='image-open-modal' contentClassName='image-open-modal' show={true} onHide={props.hideNoteModal}>
                         <Modal.Title>Select an Image</Modal.Title>
                         <Modal.Body>
-                        <ImageViewer />
+                        <ImageViewer requestNoteRefresh={props.requestNoteRefresh} />
                         </Modal.Body>
                         </Modal>;
             }
@@ -380,7 +403,7 @@ export function Notes(props: NotesProps) {
             return <>{elem}{parseNote(note, note_id, props.requestNoteRefresh, openImageModal)}</>;
         }, <></>);
 
-        return <><NoteModal state={noteModalState} hideNoteModal={() => setNoteModalState({kind: 'closed'})} /><div className='notes'>{noteElements}</div></>;
+        return <><NoteModal state={noteModalState} hideNoteModal={() => setNoteModalState({kind: 'closed'})} requestNoteRefresh={props.requestNoteRefresh} /><div className='notes'>{noteElements}</div></>;
     } else {
         return <><div className='notes'></div></>;
     }
