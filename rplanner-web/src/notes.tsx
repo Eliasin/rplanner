@@ -68,7 +68,7 @@ function resetNoteChangeTimer(noteID: NoteID, noteTimers: NoteChangeTimers) {
 }
 
 function flushNoteChanges(noteElement: HTMLElement): Promise<void> {
-    if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
+    if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === null) {
         return Promise.resolve();
     }
 
@@ -79,7 +79,7 @@ function flushNoteChanges(noteElement: HTMLElement): Promise<void> {
     }
 
     const textFragment: TextNote = {
-        Text: noteElement.textContent ?? ''
+        Text: noteElement.textContent,
     };
 
     const note: Note = {
@@ -91,7 +91,7 @@ function flushNoteChanges(noteElement: HTMLElement): Promise<void> {
 }
 
 function getNoteElementID(noteElement: HTMLElement): NoteID | null {
-    if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === undefined) {
+    if (noteElement.dataset['noteId'] === undefined) {
         return null;
     }
 
@@ -142,16 +142,73 @@ function handleEnterKeyInNote(noteTimers: NoteChangeTimers, e: Event) {
     resetNoteElementChangeTimer(noteElement, noteTimers);
 }
 
-function moveCaretPositionIntoNote(position: CaretPosition) {
-
-}
-
-function getLastTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): FragmentNum | null {
-    if (noteID > notes.length) {
+function getNoteElementFragmentNum(noteElement: HTMLElement): FragmentNum | null {
+    if (noteElement.dataset['order'] === undefined || noteElement.textContent === null) {
         return null;
     }
 
-    const [, note] = notes[noteID];
+    const fragmentNum = parseInt(noteElement.dataset['order']);
+
+    if (isNaN(fragmentNum)) {
+        return null;
+    }
+
+    return fragmentNum;
+}
+
+function moveCaretPositionIntoNote(position: CaretPosition) {
+    const textFragments = document.getElementsByClassName('note-text');
+    for (const _textFragment of textFragments) {
+        const textFragment = _textFragment as HTMLElement;
+        const noteID = getNoteElementID(textFragment);
+        const fragmentNum = getNoteElementFragmentNum(textFragment);
+
+        if (noteID !== null && fragmentNum !== null && noteID === position.noteID && fragmentNum === position.fragmentNum) {
+            const selection = window.getSelection();
+
+            if (selection) {
+                const range = document.createRange();
+                range.setEnd(textFragment.childNodes[0], position.index);
+                range.collapse();
+                selection.removeAllRanges();
+                selection.addRange(range);
+
+                /* For some ridiculous reason, when we change the selection something
+                 * changes it to the start of the fragment, so we listen for the next
+                 * selection change and override it once
+                 * */
+                document.onselectionchange = () => {
+                    const range = document.createRange();
+                    range.setEnd(textFragment.childNodes[0], position.index);
+                    range.collapse();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+
+                    document.onselectionchange = () => {};
+                };
+
+                return;
+            }
+        }
+    }
+}
+
+function getNoteFromNotes(noteID: NoteID, notes: Array<[NoteID, Note]>): Note | null {
+    for (const [id, note] of notes) {
+        if (noteID === id) {
+            return note;
+        }
+    }
+
+    return null;
+}
+
+function getLastTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): FragmentNum | null {
+    const note = getNoteFromNotes(noteID, notes);
+    if (note === null) {
+        return null;
+    }
+
     for (let index = 0; index < note.content.length; index++) {
         const fragment = note.content[index];
         if ('Text' in fragment) {
@@ -187,14 +244,18 @@ function handleUpArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
         if (atBeginningOfFragment && thereIsAPreviousFragment) {
             const lastTextFragmentNum = getLastTextFragmentNum(noteID, notes);
 
-            if (lastTextFragmentNum) {
-                const [, note] = notes[noteID];
+            if (lastTextFragmentNum !== null) {
+                const note = getNoteFromNotes(noteID, notes);
+                if (note === null) {
+                    return;
+                }
+
                 const fragmentLength = getFragmentLength(note, lastTextFragmentNum);
-                if (fragmentLength && fragmentLength > 0) {
+                if (fragmentLength !== null && fragmentLength > 0) {
                     moveCaretPositionIntoNote({
                         noteID,
                         fragmentNum: lastTextFragmentNum,
-                        index: fragmentLength - 1,
+                        index: fragmentLength,
                     });
                 }
             }

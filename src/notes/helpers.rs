@@ -188,7 +188,7 @@ pub fn remove_fragment_from_note(note: &mut Note, fragment_num: FragmentNum) -> 
                         let new_text = format!("{}{}", prev_text, next_text);
 
                         note.content.remove(fragment_num as usize);
-                        note.content.remove((fragment_num + 1) as usize);
+                        note.content.remove(fragment_num as usize);
                         note.content.insert(fragment_num as usize, NoteElement::Text(new_text));
                     },
                     _ => {}
