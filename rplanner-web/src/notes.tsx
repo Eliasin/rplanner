@@ -6,7 +6,7 @@ import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
 function createFragmentElement(fragment: NoteFragment, noteID: NoteID, order: number): JSX.Element {
     if ("Text" in fragment) {
-        return <div className='note-text' children={fragment.Text} data-order={order} data-note-id={noteID} contentEditable/>;
+        return <div children={fragment.Text} className='note-text' data-order={order} data-note-id={noteID} contentEditable></div>;
     } else if ("Image" in fragment) {
         return <img className='note-image' src={`images/${fragment.Image}`} data-order={order} alt='Note' />;
     }
@@ -67,6 +67,23 @@ function resetNoteChangeTimer(noteID: NoteID, noteTimers: NoteChangeTimers) {
     }
 }
 
+function constructNoteContentFromElement(noteElement: HTMLElement): Array<NoteFragment> {
+    const contents: Array<NoteFragment> = [];
+    for (const child of noteElement.childNodes) {
+        if (child.nodeName === 'DIV') {
+            contents.push({
+                Text: child.textContent ?? ''
+            });
+        } else if (child.nodeName === 'IMG') {
+            contents.push({
+                Image: (child as HTMLImageElement).src.slice(document.URL.length + '/images/'.length - 1)
+            });
+        }
+    }
+
+    return contents;
+}
+
 function flushNoteChanges(noteElement: HTMLElement): Promise<void> {
     if (noteElement.dataset['noteId'] === undefined || noteElement.textContent === null) {
         return Promise.resolve();
@@ -78,12 +95,8 @@ function flushNoteChanges(noteElement: HTMLElement): Promise<void> {
         return Promise.resolve();
     }
 
-    const textFragment: TextNote = {
-        Text: noteElement.textContent,
-    };
-
     const note: Note = {
-        content: [textFragment],
+        content: constructNoteContentFromElement(noteElement),
         date: new Date().toUTCString()
     };
 
@@ -168,26 +181,55 @@ function moveCaretPositionIntoNote(position: CaretPosition) {
 
             if (selection) {
                 const range = document.createRange();
-                range.setEnd(textFragment.childNodes[0], position.index);
-                range.collapse();
-                selection.removeAllRanges();
-                selection.addRange(range);
+                const textNode = textFragment.childNodes[0];
 
-                /* For some ridiculous reason, when we change the selection something
-                 * changes it to the start of the fragment, so we listen for the next
-                 * selection change and override it once
-                 * */
-                document.onselectionchange = () => {
-                    const range = document.createRange();
-                    range.setEnd(textFragment.childNodes[0], position.index);
+                /* When we try to move the caret into a note fragment with no text,
+                 * we need toset the start of the range to be the note element as opposed
+                 * to what we do normally which is using the text node.
+                 */
+                if (textNode === undefined) {
+                    range.setStart(textFragment, 0);
                     range.collapse();
                     selection.removeAllRanges();
                     selection.addRange(range);
 
-                    document.onselectionchange = () => {};
-                };
+                    /* For some ridiculous reason, when we change the selection something
+                    * changes it to the start of the fragment, so we listen for the next
+                    * selection change and override it once
+                    * */
+                    document.onselectionchange = () => {
+                        const range = document.createRange();
+                        range.setStart(textFragment, 0);
+                        range.collapse();
+                        selection.removeAllRanges();
+                        selection.addRange(range);
 
-                return;
+                        document.onselectionchange = () => {};
+                    };
+
+                    return;
+                } else {
+                    range.setStart(textNode, position.index);
+                    range.collapse();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+
+                    /* For some ridiculous reason, when we change the selection something
+                    * changes it to the start of the fragment, so we listen for the next
+                    * selection change and override it once
+                    * */
+                    document.onselectionchange = () => {
+                        const range = document.createRange();
+                        range.setStart(textNode, position.index);
+                        range.collapse();
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+
+                        document.onselectionchange = () => {};
+                    };
+
+                    return;
+                }
             }
         }
     }
@@ -219,6 +261,23 @@ function getLastTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): F
     return null;
 }
 
+function getNextTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): FragmentNum | null {
+    const note = getNoteFromNotes(noteID, notes);
+    if (note === null || note.content.length === 0) {
+        return null;
+    }
+
+    for (let index = note.content.length - 1; index > 0; index--) {
+        const fragment = note.content[index];
+        if ('Text' in fragment) {
+            return index;
+        }
+    }
+
+    return null;
+}
+
+
 function getFragmentLength(note: Note, fragmentNum: FragmentNum): number | null {
     if (note.content.length <= fragmentNum) {
         return null;
@@ -239,9 +298,9 @@ function handleUpArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
 
     if (position && noteID) {
         const atBeginningOfFragment = position.index === 0;
-        const thereIsAPreviousFragment = position.fragmentNum !== 0;
 
-        if (atBeginningOfFragment && thereIsAPreviousFragment) {
+        if (atBeginningOfFragment) {
+
             const lastTextFragmentNum = getLastTextFragmentNum(noteID, notes);
 
             if (lastTextFragmentNum !== null) {
@@ -264,6 +323,37 @@ function handleUpArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
     }
 }
 
+function handleDownArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
+    const position = getCaretPosition();
+    const noteID = getNoteElementID(e.target as HTMLElement);
+
+    if (position && noteID) {
+        const note = getNoteFromNotes(noteID, notes);
+        if (note === null) {
+            return;
+        }
+        const fragmentLength = getFragmentLength(note, position.fragmentNum);
+        if (fragmentLength === null) {
+            return;
+        }
+
+        const atEndOfFragment = position.index === fragmentLength;
+        if (atEndOfFragment) {
+            const nextTextFragmentNum = getNextTextFragmentNum(noteID, notes);
+            if (nextTextFragmentNum === null) {
+                return;
+            }
+
+            moveCaretPositionIntoNote({
+                noteID,
+                fragmentNum: nextTextFragmentNum,
+                index: 0,
+            });
+        }
+
+    }
+}
+
 function createNoteKeyListener(noteTimers: NoteChangeTimers, notes: Array<[NoteID, Note]>): (e: Event) => void {
     return (e: Event) => {
         if (e.type !== 'keydown') {
@@ -274,6 +364,8 @@ function createNoteKeyListener(noteTimers: NoteChangeTimers, notes: Array<[NoteI
             handleEnterKeyInNote(noteTimers, e);
         } else if ((e as KeyboardEvent).key === 'ArrowUp') {
             handleUpArrowInNote(e, notes);
+        } else if ((e as KeyboardEvent).key === 'ArrowDown') {
+            handleDownArrowInNote(e, notes);
         }
     };
 }
@@ -474,7 +566,14 @@ function getCaretPosition(): CaretPosition | null {
 
     const anchorOffset = selection.anchorOffset;
 
-    const noteElement = anchorNode.parentElement as HTMLElement;
+    let noteElement = anchorNode as HTMLElement;
+    /* When we are in a fragment with text, the anchor node will be
+     * the text node inside the note element. However, when the note
+     * fragment has no text, the anchor node is just the note element.
+     */
+    if (anchorNode.nodeType === Node.TEXT_NODE) {
+        noteElement = anchorNode.parentElement as HTMLElement;
+    }
     const noteID = getNoteElementID(noteElement);
 
     if (noteID === null) {
