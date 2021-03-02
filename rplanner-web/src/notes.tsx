@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ListGroup, Button, Modal, Form, Image } from 'react-bootstrap';
-import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse, insertImageIntoNote, FragmentNum } from './api';
+import { addNote, Note, NoteID, NoteFragment, TextNote, setNote, deleteNote, uploadImage, getImageList, GetImageListResponse, insertImageIntoNote, FragmentNum, deleteFragment } from './api';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlus, faTimes, faImage } from '@fortawesome/free-solid-svg-icons'
 
@@ -245,32 +245,47 @@ function getNoteFromNotes(noteID: NoteID, notes: Array<[NoteID, Note]>): Note | 
     return null;
 }
 
-function getLastTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): FragmentNum | null {
+function getLastFragmentNum(noteID: NoteID, fragmentNum: FragmentNum, notes: Array<[NoteID, Note]>): FragmentNum | null {
     const note = getNoteFromNotes(noteID, notes);
     if (note === null) {
         return null;
     }
 
-    for (let index = 0; index < note.content.length; index++) {
-        const fragment = note.content[index];
-        if ('Text' in fragment) {
-            return index;
-        }
+    if (fragmentNum - 1 > 0 && fragmentNum - 1 < note.content.length) {
+        return fragmentNum - 1;
     }
+
 
     return null;
 }
 
-function getNextTextFragmentNum(noteID: NoteID, notes: Array<[NoteID, Note]>): FragmentNum | null {
+function getLastTextFragmentNum(noteID: NoteID, fragmentNum: FragmentNum, notes: Array<[NoteID, Note]>): FragmentNum | null {
+    const note = getNoteFromNotes(noteID, notes);
+    if (note === null) {
+        return null;
+    }
+
+    for (let i = fragmentNum - 1; fragmentNum > 0; i--) {
+        const fragment = note.content[i];
+        if ('Text' in fragment) {
+            return i;
+        }
+    }
+
+
+    return null;
+}
+
+function getNextTextFragmentNum(noteID: NoteID, fragmentNum: FragmentNum, notes: Array<[NoteID, Note]>): FragmentNum | null {
     const note = getNoteFromNotes(noteID, notes);
     if (note === null || note.content.length === 0) {
         return null;
     }
 
-    for (let index = note.content.length - 1; index > 0; index--) {
-        const fragment = note.content[index];
+    for (let i = fragmentNum + 1; fragmentNum < note.content.length; i++) {
+        const fragment = note.content[i];
         if ('Text' in fragment) {
-            return index;
+            return i;
         }
     }
 
@@ -301,7 +316,7 @@ function handleUpArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
 
         if (atBeginningOfFragment) {
 
-            const lastTextFragmentNum = getLastTextFragmentNum(noteID, notes);
+            const lastTextFragmentNum = getLastTextFragmentNum(noteID, position.fragmentNum, notes);
 
             if (lastTextFragmentNum !== null) {
                 const note = getNoteFromNotes(noteID, notes);
@@ -319,7 +334,6 @@ function handleUpArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
                 }
             }
         }
-
     }
 }
 
@@ -339,11 +353,12 @@ function handleDownArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
 
         const atEndOfFragment = position.index === fragmentLength;
         if (atEndOfFragment) {
-            const nextTextFragmentNum = getNextTextFragmentNum(noteID, notes);
+            const nextTextFragmentNum = getNextTextFragmentNum(noteID, position.fragmentNum, notes);
             if (nextTextFragmentNum === null) {
                 return;
             }
 
+            console.log(nextTextFragmentNum)
             moveCaretPositionIntoNote({
                 noteID,
                 fragmentNum: nextTextFragmentNum,
@@ -354,7 +369,26 @@ function handleDownArrowInNote(e: Event, notes: Array<[NoteID, Note]>) {
     }
 }
 
-function createNoteKeyListener(noteTimers: NoteChangeTimers, notes: Array<[NoteID, Note]>): (e: Event) => void {
+function handleBackspaceInNote(e: Event, notes: Array<[NoteID, Note]>, requestNoteRefresh: () => void) {
+    const position = getCaretPosition();
+    const noteID = getNoteElementID(e.target as HTMLElement);
+
+    if (position && noteID) {
+        const atBeginningOfFragment = position.index === 0;
+
+        if (atBeginningOfFragment) {
+            const lastFragmentNum = getLastFragmentNum(noteID, position.fragmentNum, notes);
+
+            if (lastFragmentNum !== null) {
+                deleteFragment(noteID, lastFragmentNum).then(() => {
+                    requestNoteRefresh();
+                });
+            }
+        }
+    }
+}
+
+function createNoteKeyListener(noteTimers: NoteChangeTimers, notes: Array<[NoteID, Note]>, requestNoteRefresh: () => void): (e: Event) => void {
     return (e: Event) => {
         if (e.type !== 'keydown') {
             return;
@@ -366,6 +400,8 @@ function createNoteKeyListener(noteTimers: NoteChangeTimers, notes: Array<[NoteI
             handleUpArrowInNote(e, notes);
         } else if ((e as KeyboardEvent).key === 'ArrowDown') {
             handleDownArrowInNote(e, notes);
+        } else if ((e as KeyboardEvent).key === 'Backspace') {
+            handleBackspaceInNote(e, notes, requestNoteRefresh);
         }
     };
 }
@@ -614,7 +650,7 @@ export function Notes(props: NotesProps) {
         let noteElements = Array.from(document.getElementsByClassName('note-text'));
 
         const noteEventListener = createNoteEventListener(noteChangeTimers);
-        const noteEnterListener = createNoteKeyListener(noteChangeTimers, notes);
+        const noteEnterListener = createNoteKeyListener(noteChangeTimers, notes, props.requestNoteRefresh);
         for (const element of noteElements) {
             element.removeEventListener('input', noteEventListener);
             element.removeEventListener('keydown', noteEnterListener);

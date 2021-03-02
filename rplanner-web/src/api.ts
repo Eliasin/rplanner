@@ -114,3 +114,23 @@ export async function insertImageIntoNote(note_id: number, fragment_num: number,
         body: JSON.stringify(insertImageRequest),
     }));
 }
+
+export type DeleteFragmentRequest = {
+    note_id: NoteID;
+    fragment_num: FragmentNum;
+};
+
+export async function deleteFragment(note_id: NoteID, fragment_num: FragmentNum) {
+    const deleteFragmentRequest: DeleteFragmentRequest = {
+        note_id,
+        fragment_num,
+    };
+
+    return (await fetch('/api/delete_fragment', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(deleteFragmentRequest),
+    }));
+}

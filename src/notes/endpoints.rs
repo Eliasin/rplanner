@@ -114,5 +114,8 @@ pub fn delete_fragment(delete_fragment_request: Json<DeleteFragmentRequest>, db_
     let mut note = get_note_from_db(delete_fragment_request.note_id, &db_connection)?;
     remove_fragment_from_note(&mut note, delete_fragment_request.fragment_num)?;
 
+    delete_note_contents_from_db(delete_fragment_request.note_id, &db_connection)?;
+    add_note_contents_to_db(delete_fragment_request.note_id, note.content.into_iter(), &db_connection)?;
+
     Ok(())
 }
