@@ -5,9 +5,12 @@ rust: target
 target:
 	cargo build
 
-WEB_FILES = $(wildcard rplanner-web/src/*)
+WEB_SRC_FILES = $(wildcard rplanner-client/src/**/*.rs)
+WEB_CSS_FILES = $(wildcard rplanner-client/css/*.css)
+WEB_HTML_FILES = $(wildcard rplanner-client/*.html)
+WEB_FILES = $(WEB_SRC_FILES) $(WEB_CSS_FILES) $(WEB_HTML_FILES)
 web: $(WEB_FILES)
-	rm -rf web/ && cd rplanner-web && yarn build && cp -r build/ ../web/
+	rm -rf web/ && cd rplanner-client && trunk build && cp -r dist/ ../web/
 
 clean:
 	rm -rf web/

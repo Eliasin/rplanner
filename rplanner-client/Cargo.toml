@@ -1,0 +1,19 @@
+[package]
+name = "rplanner-client"
+version = "0.1.0"
+authors = ["Steven Pham <steven.pham.8.2000@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+yew = "0.17"
+wasm-bindgen = "0.2.67"
+serde_json = "1.0.61"
+web-sys = { version = "0.3.48", features = ["HtmlCollection", "Element", "HtmlImageElement"] }
+serde = { version = "1.0", features = ["derive"] }
+chrono = { version = "0.4.19", features = ["wasmbind"] }
+anyhow = "1.0.38"

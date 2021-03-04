@@ -5,6 +5,8 @@
 /rplanner-web/build/
 /rplanner-web/node_modules/
 /rplanner-web/.eslintcache
+/rplanner-client/target/
+/rplanner-client/dist/
 /images
 
 rplanner.db
