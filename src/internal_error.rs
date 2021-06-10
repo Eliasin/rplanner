@@ -1,12 +1,14 @@
 use rusqlite;
-use rocket_multipart_form_data::MultipartFormDataError;
 use std::error::Error;
 use std::io;
+
+use rocket::response::Responder;
 
 use std::fmt;
 use std::sync::PoisonError;
 
-#[derive(Debug)]
+#[derive(Debug, Responder)]
+#[response(status = 500, content_type = "json")]
 pub struct InternalError {
     what: String,
 }
@@ -34,18 +36,10 @@ impl From<rusqlite::Error> for InternalError {
     }
 }
 
-impl From<MultipartFormDataError> for InternalError {
-    fn from(e: MultipartFormDataError) -> InternalError {
-        InternalError {
-            what: e.to_string()
-        }
-    }
-}
-
 impl From<io::Error> for InternalError {
     fn from(e: io::Error) -> InternalError {
         InternalError {
-            what: e.to_string()
+            what: e.to_string(),
         }
     }
 }
@@ -53,10 +47,9 @@ impl From<io::Error> for InternalError {
 impl From<&str> for InternalError {
     fn from(s: &str) -> InternalError {
         InternalError {
-            what: s.to_string()
+            what: s.to_string(),
         }
     }
 }
-
 
 pub type InternalResult<T> = Result<T, InternalError>;

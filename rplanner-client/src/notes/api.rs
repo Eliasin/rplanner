@@ -1,7 +1,7 @@
-use serde::{ Serialize, Deserialize };
-use yew::services::ConsoleService;
-use yew::services::fetch::Response;
+use serde::{Deserialize, Serialize};
 use yew::format::Json;
+use yew::services::fetch::Response;
+use yew::services::ConsoleService;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NoteElement {
@@ -11,7 +11,7 @@ pub enum NoteElement {
 
 pub enum FragmentTag {
     Text,
-    Image
+    Image,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -40,7 +40,7 @@ pub struct DeleteNoteRequest {
     pub note_id: i64,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct ImageListResponse {
     pub images: Vec<String>,
 }

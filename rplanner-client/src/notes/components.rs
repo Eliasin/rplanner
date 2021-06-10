@@ -5,9 +5,11 @@ use chrono::offset::Utc;
 use yew::services::fetch::{FetchService, FetchTask, Request};
 use yew::services::interval::{IntervalService, IntervalTask};
 use yew::{
+    agent::{Dispatched, Dispatcher},
     format::{Json, Nothing},
     prelude::*,
 };
+use ModalEvent::OpenImageSelector;
 
 use anyhow::anyhow;
 
@@ -15,11 +17,13 @@ use wasm_bindgen::JsCast;
 
 use super::api::*;
 
+use crate::root::agents::{EventBus, ModalEvent, Request as BusRequest};
+
 fn view_note_element(element: NoteElement, text_input_callback: Callback<InputData>) -> Html {
     match &element {
         NoteElement::Text(v) => {
             html! {
-                <div class=vec!["note"] contentEditable=true oninput=text_input_callback>{v}</div>
+                <div class=vec!["note"] contentEditable="true" oninput=text_input_callback>{v}</div>
             }
         }
         NoteElement::Image(v) => {
@@ -33,7 +37,7 @@ fn view_note_element(element: NoteElement, text_input_callback: Callback<InputDa
 fn view_note(note_id: NoteID, note: &Note, link: &ComponentLink<NotesComponent>) -> Html {
     html! {
         <div class="noteBlock">
-            <button class="noteButton noteImage"><i class="las la-image"/></button>
+            <button class="noteButton noteImage" onclick={link.callback(|_| NotesComponentMsg::OpenImageModel)}><i class="las la-image"/></button>
             <button class="noteButton noteDelete" onclick={link.callback(move |_| NotesComponentMsg::DeleteNote(note_id))}><i class="las la-times"/></button>
             <div class="note" id=format!("note-{}", note_id)>
             { note.content.iter().map(|f: &NoteElement| {
@@ -57,6 +61,7 @@ pub enum NotesComponentMsg {
     EditNote(NoteID),
     TickNoteTimers,
     AddNote,
+    OpenImageModel,
     Noop,
 }
 
@@ -66,6 +71,7 @@ pub struct NotesComponent {
     _get_fetch_task: Option<FetchTask>,
     _add_fetch_task: Option<FetchTask>,
     _interval_task: Option<IntervalTask>,
+    event_bus: Dispatcher<EventBus>,
     notes: EnumeratedNotes,
     link: ComponentLink<Self>,
     note_timers: HashMap<NoteID, NoteTimer>,
@@ -201,6 +207,7 @@ impl Component for NotesComponent {
             _get_fetch_task: None,
             _set_fetch_task: None,
             _add_fetch_task: None,
+            event_bus: EventBus::dispatcher(),
             link,
             notes: vec![],
             note_timers: HashMap::new(),
@@ -301,6 +308,11 @@ impl Component for NotesComponent {
                         log_error_to_js(e);
                     }
                 };
+                true
+            }
+            OpenImageModel => {
+                self.event_bus
+                    .send(BusRequest::ModalEvent(OpenImageSelector));
                 true
             }
             Noop => false,

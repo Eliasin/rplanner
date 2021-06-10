@@ -160,14 +160,11 @@ body {
     display: flex;
     flex-flow: row;
     flex-wrap: wrap;
-}
-
-.image-open-modal {
-    width: 90vw;
     max-width: 100vw;
+    width: 90vw;
 }
 
-.image-open-modal > .modal-title {
+.modal > .modal-title {
     text-align: center;
 }
 

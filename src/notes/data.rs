@@ -1,8 +1,8 @@
 use rusqlite::Connection;
-use serde::{ Serialize, Deserialize };
+use serde::{Deserialize, Serialize};
 
-use std::sync::{ Mutex, Arc };
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NoteElement {
@@ -12,7 +12,7 @@ pub enum NoteElement {
 
 pub enum FragmentTag {
     Text,
-    Image
+    Image,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,7 +44,7 @@ pub struct DeleteNoteRequest {
     pub note_id: i64,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct ImageListResponse {
     pub images: Vec<String>,
 }
