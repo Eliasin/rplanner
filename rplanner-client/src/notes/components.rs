@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::time::Duration;
 
 use chrono::offset::Utc;
 use yew::services::fetch::{FetchService, FetchTask, Request};
 use yew::services::interval::{IntervalService, IntervalTask};
 use yew::services::reader::{FileData, ReaderService, ReaderTask};
+use yew::utils;
 use yew::{
     agent::{Dispatched, Dispatcher},
     events::ChangeData,
@@ -14,7 +16,7 @@ use yew::{
 use ModalEvent::OpenImageSelector;
 
 use wasm_bindgen::JsCast;
-use web_sys::File;
+use web_sys::{File, HtmlElement};
 
 use anyhow::anyhow;
 
@@ -22,11 +24,16 @@ use super::api::*;
 
 use crate::root::agents::{EventBus, ModalEvent, Request as BusRequest};
 
-fn view_note_element(element: NoteElement, text_input_callback: Callback<InputData>) -> Html {
+fn view_note_element(
+    element: NoteElement,
+    note_id: NoteID,
+    order: u32,
+    text_input_callback: Callback<InputData>,
+) -> Html {
     match &element {
         NoteElement::Text(v) => {
             html! {
-                <div class=classes!("note") contentEditable="true" oninput=text_input_callback>{v}</div>
+                <div class=classes!("note") data-note-id=note_id.to_string() data-order=order.to_string() contentEditable="true" oninput=text_input_callback>{v}</div>
             }
         }
         NoteElement::Image(v) => {
@@ -37,14 +44,59 @@ fn view_note_element(element: NoteElement, text_input_callback: Callback<InputDa
     }
 }
 
+fn get_note_element_id(note_element: &HtmlElement) -> Option<NoteID> {
+    let dataset = note_element.dataset();
+
+    Some(dataset.get("noteId")?.parse().ok()?)
+}
+
+fn get_note_element_fragment_num(note_element: &HtmlElement) -> Option<FragmentNum> {
+    let dataset = note_element.dataset();
+
+    Some(dataset.get("order")?.parse().ok()?)
+}
+
+fn get_caret_position() -> Option<CaretPosition> {
+    match utils::window().get_selection() {
+        Ok(selection) => match selection {
+            Some(selection) => {
+                let anchor_node = selection.anchor_node()?;
+                let anchor_offset = selection.anchor_offset();
+
+                let note_element = if anchor_node.node_type() == web_sys::Node::TEXT_NODE {
+                    anchor_node
+                        .parent_element()?
+                        .dyn_into::<HtmlElement>()
+                        .ok()?
+                } else {
+                    anchor_node.dyn_into::<HtmlElement>().ok()?
+                };
+
+                let note_id = get_note_element_id(&note_element)?;
+                let fragment_num = get_note_element_fragment_num(&note_element)?;
+
+                Some(CaretPosition {
+                    noteID: note_id,
+                    fragmentNum: fragment_num,
+                    index: anchor_offset,
+                })
+            }
+            None => None,
+        },
+        Err(_) => None,
+    }
+}
+
 fn view_note(note_id: NoteID, note: &Note, link: &ComponentLink<NotesComponent>) -> Html {
     html! {
         <div class="noteBlock">
             <button class="noteButton noteImage" onclick={link.callback(|_| NotesComponentMsg::OpenImageModel)}><i class="las la-image"/></button>
             <button class="noteButton noteDelete" onclick={link.callback(move |_| NotesComponentMsg::DeleteNote(note_id))}><i class="las la-times"/></button>
             <div class="note" id=format!("note-{}", note_id)>
-            { note.content.iter().map(|f: &NoteElement| {
-                view_note_element(f.clone(), link.callback(move |_| NotesComponentMsg::EditNote(note_id)))
+            { note.content.iter().enumerate().map(|(i, f): (usize, &NoteElement)| {
+                view_note_element(f.clone(), note_id, i.try_into().unwrap(), link.callback(move |_| {
+                    NotesComponentMsg::EditNote(note_id)
+                }))
             }).collect::<Html>() }
             </div>
         </div>

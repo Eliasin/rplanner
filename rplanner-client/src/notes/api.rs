@@ -59,6 +59,13 @@ pub struct DeleteFragmentRequest {
     pub fragment_num: FragmentNum,
 }
 
+#[derive(Serialize, Debug)]
+pub struct CaretPosition {
+    pub noteID: NoteID,
+    pub fragmentNum: FragmentNum,
+    pub index: u32,
+}
+
 pub type EnumeratedNotes = Vec<(NoteID, Note)>;
 
 pub type JsonFetchResponse<T> = Response<Json<Result<T, anyhow::Error>>>;
