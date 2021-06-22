@@ -2,9 +2,7 @@ use chrono::offset::Utc;
 use rusqlite::{params, Connection, Row, NO_PARAMS};
 
 use std::collections::HashMap;
-use std::fs::{read_dir, File};
-use std::io;
-use std::io::Write;
+use std::fs::read_dir;
 use std::path::Path;
 
 use crate::internal_error::{InternalError, InternalResult};
@@ -142,13 +140,6 @@ pub fn update_note_date(
 pub fn delete_note_from_db(note_id: NoteID, db_connection: &Connection) -> InternalResult<()> {
     db_connection.execute("DELETE FROM notes WHERE rowid = (?1)", params![note_id])?;
 
-    Ok(())
-}
-
-pub fn write_data_to_disk(path: &Path, data: &Vec<u8>) -> io::Result<()> {
-    let mut file = File::create(path)?;
-
-    file.write(data)?;
     Ok(())
 }
 

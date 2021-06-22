@@ -77,11 +77,11 @@ impl Component for ModalImageSelector {
                     <>
                     <div class=classes!("modal-title")>
                     {"Image Selection"}
+                    </div>
                     <div class=classes!("image-viewer")>
                     {v.iter().map(|path| {
                         view_modal_image_tooltip(path)
                     }).collect::<Html>()}
-                    </div>
                     </div>
                     </>
                 }

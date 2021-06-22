@@ -1,9 +1,9 @@
+use rocket::data::{Data, ToByteUnit};
 use rocket::serde::json::Json;
 use rocket::{get, post, State};
 
-use base64::decode;
-
 use std::path::Path;
+use tokio::fs::File;
 
 use crate::internal_error::{InternalError, InternalResult};
 
@@ -60,25 +60,21 @@ pub fn delete_note(
     Ok(())
 }
 
-#[post("/upload_image?<name>", data = "<data>")]
-pub fn upload_image(name: String, data: String) -> InternalResult<()> {
-    let image = decode(data);
-    match image {
-        Ok(data) => {
-            let image_folder_path = Path::new("images");
+const MAX_IMAGE_SIZE_KIB: usize = 2048;
+#[post("/upload_image/<name>", data = "<data>")]
+pub async fn upload_image(data: Data<'_>, name: &str) -> InternalResult<()> {
+    let image_folder_path = Path::new("images");
 
-            let image_file_path = image_folder_path.join(Path::new(&name));
-            if validate_path_is_in_image_folder(&image_file_path) {
-                write_data_to_disk(&image_file_path, &data)?;
-                Ok(())
-            } else {
-                Err(InternalError::from("Invalid image name"))
-            }
-        }
-        Err(e) => Err(InternalError::from(
-            format!("Failed base64 decode: {}", e).as_str(),
-        )),
+    let image_file_path = image_folder_path.join(Path::new(name));
+    if validate_path_is_in_image_folder(&image_file_path) {
+        data.open(MAX_IMAGE_SIZE_KIB.kibibytes())
+            .stream_to(File::create(&image_file_path).await?)
+            .await?;
+    } else {
+        return Err(InternalError::from("Invalid image name"));
     }
+
+    Ok(())
 }
 
 #[get("/get_image_list")]

@@ -4,16 +4,19 @@ use std::time::Duration;
 use chrono::offset::Utc;
 use yew::services::fetch::{FetchService, FetchTask, Request};
 use yew::services::interval::{IntervalService, IntervalTask};
+use yew::services::reader::{FileData, ReaderService, ReaderTask};
 use yew::{
     agent::{Dispatched, Dispatcher},
-    format::{Json, Nothing},
+    events::ChangeData,
+    format::{Binary, Json, Nothing},
     prelude::*,
 };
 use ModalEvent::OpenImageSelector;
 
-use anyhow::anyhow;
-
 use wasm_bindgen::JsCast;
+use web_sys::File;
+
+use anyhow::anyhow;
 
 use super::api::*;
 
@@ -23,12 +26,12 @@ fn view_note_element(element: NoteElement, text_input_callback: Callback<InputDa
     match &element {
         NoteElement::Text(v) => {
             html! {
-                <div class=vec!["note"] contentEditable="true" oninput=text_input_callback>{v}</div>
+                <div class=classes!("note") contentEditable="true" oninput=text_input_callback>{v}</div>
             }
         }
         NoteElement::Image(v) => {
             html! {
-                <img class=vec!["noteImage"] src=format!("images/{}", v) alt="Note" />
+                <img class=classes!("noteImage") src=format!("images/{}", v) alt="Note" />
             }
         }
     }
@@ -62,6 +65,8 @@ pub enum NotesComponentMsg {
     TickNoteTimers,
     AddNote,
     OpenImageModel,
+    UploadImage(String, Vec<u8>),
+    StartReadingImage(File),
     Noop,
 }
 
@@ -71,6 +76,8 @@ pub struct NotesComponent {
     _get_fetch_task: Option<FetchTask>,
     _add_fetch_task: Option<FetchTask>,
     _interval_task: Option<IntervalTask>,
+    _upload_image_fetch_task: Option<FetchTask>,
+    _read_image_task: Option<ReaderTask>,
     event_bus: Dispatcher<EventBus>,
     notes: EnumeratedNotes,
     link: ComponentLink<Self>,
@@ -194,6 +201,19 @@ impl NotesComponent {
 
         Ok(())
     }
+
+    fn upload_image(&mut self, name: &str, image_bytes: Vec<u8>) -> Result<(), anyhow::Error> {
+        let request =
+            Request::post(format!("/api/upload_image/{}", name)).body(Binary::Ok(image_bytes))?;
+
+        let callback = self.link.batch_callback(|_| vec![]);
+
+        let task = FetchService::fetch_binary::<Binary, Binary>(request, callback)?;
+
+        self._upload_image_fetch_task = Some(task);
+
+        Ok(())
+    }
 }
 
 impl Component for NotesComponent {
@@ -207,6 +227,8 @@ impl Component for NotesComponent {
             _get_fetch_task: None,
             _set_fetch_task: None,
             _add_fetch_task: None,
+            _upload_image_fetch_task: None,
+            _read_image_task: None,
             event_bus: EventBus::dispatcher(),
             link,
             notes: vec![],
@@ -219,7 +241,31 @@ impl Component for NotesComponent {
             <>
             { self.view_notes() }
             <div class="functionBar">
-                <button class="addNote" onclick=self.link.callback(|_| NotesComponentMsg::AddNote)><i class="las la-plus" /></button>
+                <button class="addNote" onclick=self.link.callback(|_| NotesComponentMsg::AddNote)><i class=classes!("las", "la-plus") /></button>
+                <label class="image-file-upload">
+                <input type="file" accept=".png,.jpg" onchange=self.link.batch_callback(|event| {
+                    match event {
+                        ChangeData::Files(file_list) => {
+                            for file_num in 0..file_list.length() {
+                                let file = file_list.get(file_num);
+                                match file {
+                                    Some(file) => {
+                                        return vec![NotesComponentMsg::StartReadingImage(file)];
+                                    },
+                                    None => {
+                                        return vec![];
+                                    },
+                                }
+                            };
+                            vec![]
+                        },
+                        _ => {
+                            vec![]
+                        }
+                    }
+                })/>
+                    <i class=classes!("las", "la-file-image") />
+                </label>
             </div>
             </>
         }
@@ -314,6 +360,33 @@ impl Component for NotesComponent {
                 self.event_bus
                     .send(BusRequest::ModalEvent(OpenImageSelector));
                 true
+            }
+            UploadImage(name, image_bytes) => {
+                match self.upload_image(name.as_str(), image_bytes) {
+                    Ok(_) => {}
+                    Err(e) => log_error_to_js(e),
+                };
+
+                false
+            }
+            StartReadingImage(file) => {
+                match ReaderService::read_file(
+                    file,
+                    self.link.batch_callback(|file_data: FileData| {
+                        vec![NotesComponentMsg::UploadImage(
+                            file_data.name,
+                            file_data.content,
+                        )]
+                    }),
+                ) {
+                    Ok(reader_task) => {
+                        self._read_image_task = Some(reader_task);
+                    }
+                    Err(e) => {
+                        log_error_to_js(e);
+                    }
+                };
+                false
             }
             Noop => false,
         }
