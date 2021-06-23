@@ -10,8 +10,14 @@ pub enum ModalEvent {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum NoteEvent {
+    InsertImageRequest(String),
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Request {
     ModalEvent(ModalEvent),
+    NoteEvent(NoteEvent),
 }
 
 pub struct EventBus {

@@ -2,7 +2,6 @@
 use wasm_bindgen::prelude::*;
 use yew::start_app;
 
-mod event_bus;
 mod notes;
 mod root;
 

@@ -6,9 +6,7 @@ use chrono::offset::Utc;
 use yew::services::fetch::{FetchService, FetchTask, Request};
 use yew::services::interval::{IntervalService, IntervalTask};
 use yew::services::reader::{FileData, ReaderService, ReaderTask};
-use yew::utils;
 use yew::{
-    agent::{Dispatched, Dispatcher},
     events::ChangeData,
     format::{Binary, Json, Nothing},
     prelude::*,
@@ -16,13 +14,15 @@ use yew::{
 use ModalEvent::OpenImageSelector;
 
 use wasm_bindgen::JsCast;
-use web_sys::{File, HtmlElement};
+use web_sys::File;
 
 use anyhow::anyhow;
 
+use super::api::InsertImageRequest as InsertImageRequestStruct;
 use super::api::*;
+use super::util::*;
 
-use crate::root::agents::{EventBus, ModalEvent, Request as BusRequest};
+use crate::root::agents::{EventBus, ModalEvent, NoteEvent, Request as BusRequest};
 
 fn view_note_element(
     element: NoteElement,
@@ -38,64 +38,21 @@ fn view_note_element(
         }
         NoteElement::Image(v) => {
             html! {
-                <img class=classes!("noteImage") src=format!("images/{}", v) alt="Note" />
+                <img class=classes!("note-content-image") src=format!("images/{}", v) alt="Note" />
             }
         }
-    }
-}
-
-fn get_note_element_id(note_element: &HtmlElement) -> Option<NoteID> {
-    let dataset = note_element.dataset();
-
-    Some(dataset.get("noteId")?.parse().ok()?)
-}
-
-fn get_note_element_fragment_num(note_element: &HtmlElement) -> Option<FragmentNum> {
-    let dataset = note_element.dataset();
-
-    Some(dataset.get("order")?.parse().ok()?)
-}
-
-fn get_caret_position() -> Option<CaretPosition> {
-    match utils::window().get_selection() {
-        Ok(selection) => match selection {
-            Some(selection) => {
-                let anchor_node = selection.anchor_node()?;
-                let anchor_offset = selection.anchor_offset();
-
-                let note_element = if anchor_node.node_type() == web_sys::Node::TEXT_NODE {
-                    anchor_node
-                        .parent_element()?
-                        .dyn_into::<HtmlElement>()
-                        .ok()?
-                } else {
-                    anchor_node.dyn_into::<HtmlElement>().ok()?
-                };
-
-                let note_id = get_note_element_id(&note_element)?;
-                let fragment_num = get_note_element_fragment_num(&note_element)?;
-
-                Some(CaretPosition {
-                    noteID: note_id,
-                    fragmentNum: fragment_num,
-                    index: anchor_offset,
-                })
-            }
-            None => None,
-        },
-        Err(_) => None,
     }
 }
 
 fn view_note(note_id: NoteID, note: &Note, link: &ComponentLink<NotesComponent>) -> Html {
     html! {
         <div class="noteBlock">
-            <button class="noteButton noteImage" onclick={link.callback(|_| NotesComponentMsg::OpenImageModel)}><i class="las la-image"/></button>
-            <button class="noteButton noteDelete" onclick={link.callback(move |_| NotesComponentMsg::DeleteNote(note_id))}><i class="las la-times"/></button>
+            <button class="noteButton noteImage" onclick={link.callback(|_| NotesComponentMsg::Internal(InternalNotesComponentMessage::OpenImageModel))}><i class="las la-image"/></button>
+            <button class="noteButton noteDelete" onclick={link.callback(move |_| NotesComponentMsg::Internal(InternalNotesComponentMessage::DeleteNote(note_id)))}><i class="las la-times"/></button>
             <div class="note" id=format!("note-{}", note_id)>
             { note.content.iter().enumerate().map(|(i, f): (usize, &NoteElement)| {
                 view_note_element(f.clone(), note_id, i.try_into().unwrap(), link.callback(move |_| {
-                    NotesComponentMsg::EditNote(note_id)
+                    NotesComponentMsg::Internal(InternalNotesComponentMessage::EditNote(note_id))
                 }))
             }).collect::<Html>() }
             </div>
@@ -109,7 +66,7 @@ struct NoteTimer {
 }
 
 #[derive(Debug)]
-pub enum NotesComponentMsg {
+pub enum InternalNotesComponentMessage {
     UpdateNotes,
     DeleteNote(NoteID),
     ReceivedNotes(Result<EnumeratedNotes, anyhow::Error>),
@@ -119,7 +76,12 @@ pub enum NotesComponentMsg {
     OpenImageModel,
     UploadImage(String, Vec<u8>),
     StartReadingImage(File),
-    Noop,
+}
+
+#[derive(Debug)]
+pub enum NotesComponentMsg {
+    Internal(InternalNotesComponentMessage),
+    NoteEvent(NoteEvent),
 }
 
 pub struct NotesComponent {
@@ -130,7 +92,8 @@ pub struct NotesComponent {
     _interval_task: Option<IntervalTask>,
     _upload_image_fetch_task: Option<FetchTask>,
     _read_image_task: Option<ReaderTask>,
-    event_bus: Dispatcher<EventBus>,
+    _insert_image_task: Option<FetchTask>,
+    event_bus: Box<dyn Bridge<EventBus>>,
     notes: EnumeratedNotes,
     link: ComponentLink<Self>,
     note_timers: HashMap<NoteID, NoteTimer>,
@@ -144,9 +107,9 @@ impl NotesComponent {
             .header("Content-Type", "application/json")
             .body(Json(&request_object))?;
 
-        let callback = self
-            .link
-            .callback(|_: JsonFetchResponse<()>| NotesComponentMsg::UpdateNotes);
+        let callback = self.link.callback(|_: JsonFetchResponse<()>| {
+            NotesComponentMsg::Internal(InternalNotesComponentMessage::UpdateNotes)
+        });
 
         let task = FetchService::fetch(request, callback)?;
 
@@ -216,9 +179,7 @@ impl NotesComponent {
                 .header("Content-Type", "application/json")
                 .body(Json(&request_object))?;
 
-            let callback = self
-                .link
-                .callback(|_: JsonFetchResponse<()>| NotesComponentMsg::Noop);
+            let callback = self.link.batch_callback(|_: JsonFetchResponse<()>| None);
 
             let task = FetchService::fetch(request, callback)?;
 
@@ -234,6 +195,7 @@ impl NotesComponent {
     }
 
     fn add_note(&mut self) -> Result<(), anyhow::Error> {
+        use InternalNotesComponentMessage::*;
         let note = Note {
             content: vec![NoteElement::Text("New note...".to_string())],
             date: Utc::now().to_rfc2822(),
@@ -245,7 +207,7 @@ impl NotesComponent {
 
         let callback = self
             .link
-            .callback(|_: JsonFetchResponse<()>| NotesComponentMsg::UpdateNotes);
+            .callback(|_: JsonFetchResponse<()>| NotesComponentMsg::Internal(UpdateNotes));
 
         let task = FetchService::fetch(request, callback)?;
 
@@ -258,7 +220,7 @@ impl NotesComponent {
         let request =
             Request::post(format!("/api/upload_image/{}", name)).body(Binary::Ok(image_bytes))?;
 
-        let callback = self.link.batch_callback(|_| vec![]);
+        let callback = self.link.batch_callback(|_| None);
 
         let task = FetchService::fetch_binary::<Binary, Binary>(request, callback)?;
 
@@ -268,63 +230,9 @@ impl NotesComponent {
     }
 }
 
-impl Component for NotesComponent {
-    type Message = NotesComponentMsg;
-    type Properties = ();
-
-    fn create(_: Self::Properties, link: ComponentLink<Self>) -> Self {
-        NotesComponent {
-            _delete_fetch_task: None,
-            _interval_task: None,
-            _get_fetch_task: None,
-            _set_fetch_task: None,
-            _add_fetch_task: None,
-            _upload_image_fetch_task: None,
-            _read_image_task: None,
-            event_bus: EventBus::dispatcher(),
-            link,
-            notes: vec![],
-            note_timers: HashMap::new(),
-        }
-    }
-
-    fn view(&self) -> Html {
-        html! {
-            <>
-            { self.view_notes() }
-            <div class="functionBar">
-                <button class="addNote" onclick=self.link.callback(|_| NotesComponentMsg::AddNote)><i class=classes!("las", "la-plus") /></button>
-                <label class="image-file-upload">
-                <input type="file" accept=".png,.jpg" onchange=self.link.batch_callback(|event| {
-                    match event {
-                        ChangeData::Files(file_list) => {
-                            for file_num in 0..file_list.length() {
-                                let file = file_list.get(file_num);
-                                match file {
-                                    Some(file) => {
-                                        return vec![NotesComponentMsg::StartReadingImage(file)];
-                                    },
-                                    None => {
-                                        return vec![];
-                                    },
-                                }
-                            };
-                            vec![]
-                        },
-                        _ => {
-                            vec![]
-                        }
-                    }
-                })/>
-                    <i class=classes!("las", "la-file-image") />
-                </label>
-            </div>
-            </>
-        }
-    }
-
-    fn update(&mut self, msg: Self::Message) -> ShouldRender {
-        use NotesComponentMsg::*;
+impl NotesComponent {
+    fn update_internal(&mut self, msg: InternalNotesComponentMessage) -> bool {
+        use InternalNotesComponentMessage::*;
         match msg {
             UpdateNotes => {
                 let request = Request::get("/api/get_notes").body(Nothing).unwrap();
@@ -333,7 +241,7 @@ impl Component for NotesComponent {
                     self.link
                         .callback(|response: JsonFetchResponse<EnumeratedNotes>| {
                             let Json(data) = response.into_body();
-                            NotesComponentMsg::ReceivedNotes(data)
+                            NotesComponentMsg::Internal(ReceivedNotes(data))
                         });
 
                 let task = FetchService::fetch(request, callback).unwrap();
@@ -425,10 +333,10 @@ impl Component for NotesComponent {
                 match ReaderService::read_file(
                     file,
                     self.link.batch_callback(|file_data: FileData| {
-                        vec![NotesComponentMsg::UploadImage(
+                        Some(NotesComponentMsg::Internal(UploadImage(
                             file_data.name,
                             file_data.content,
-                        )]
+                        )))
                     }),
                 ) {
                     Ok(reader_task) => {
@@ -440,7 +348,121 @@ impl Component for NotesComponent {
                 };
                 false
             }
-            Noop => false,
+        }
+    }
+
+    fn update_note_events(&mut self, msg: NoteEvent) -> bool {
+        use NoteEvent::*;
+        match msg {
+            InsertImageRequest(path) => {
+                let caret_position = match get_caret_position() {
+                    Some(v) => v,
+                    None => {
+                        return false;
+                    }
+                };
+
+                let insert_image_request = InsertImageRequestStruct {
+                    note_id: caret_position.noteID,
+                    fragment_num: caret_position.fragmentNum,
+                    index: caret_position.index as usize,
+                    image_name: path,
+                };
+
+                let request = match Request::post("/api/insert_image")
+                    .header("Content-Type", "application/json")
+                    .body(Json(&insert_image_request))
+                {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return false;
+                    }
+                };
+
+                let callback = self.link.callback(|_: JsonFetchResponse<()>| {
+                    NotesComponentMsg::Internal(InternalNotesComponentMessage::UpdateNotes)
+                });
+
+                let task = match FetchService::fetch(request, callback) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log_error_to_js(e);
+                        return false;
+                    }
+                };
+
+                self._insert_image_task = Some(task);
+
+                false
+            }
+        }
+    }
+}
+
+impl Component for NotesComponent {
+    type Message = NotesComponentMsg;
+    type Properties = ();
+
+    fn create(_: Self::Properties, link: ComponentLink<Self>) -> Self {
+        NotesComponent {
+            _delete_fetch_task: None,
+            _interval_task: None,
+            _get_fetch_task: None,
+            _set_fetch_task: None,
+            _add_fetch_task: None,
+            _upload_image_fetch_task: None,
+            _read_image_task: None,
+            _insert_image_task: None,
+            event_bus: EventBus::bridge(link.batch_callback(|msg| match msg {
+                BusRequest::NoteEvent(msg) => Some(NotesComponentMsg::NoteEvent(msg)),
+                _ => None,
+            })),
+            link,
+            notes: vec![],
+            note_timers: HashMap::new(),
+        }
+    }
+
+    fn view(&self) -> Html {
+        use InternalNotesComponentMessage::*;
+        html! {
+            <>
+            { self.view_notes() }
+            <div class="functionBar">
+                <button class="addNote" onclick=self.link.callback(|_| NotesComponentMsg::Internal(AddNote))><i class=classes!("las", "la-plus") /></button>
+                <label class="image-file-upload">
+                <input type="file" accept=".png,.jpg" onchange=self.link.batch_callback(|event| {
+                    match event {
+                        ChangeData::Files(file_list) => {
+                            for file_num in 0..file_list.length() {
+                                let file = file_list.get(file_num);
+                                match file {
+                                    Some(file) => {
+                                        return Some(NotesComponentMsg::Internal(StartReadingImage(file)));
+                                    },
+                                    None => {
+                                        return None;
+                                    },
+                                }
+                            };
+                            None
+                        },
+                        _ => {
+                            None
+                        }
+                    }
+                })/>
+                    <i class=classes!("las", "la-file-image") />
+                </label>
+            </div>
+            </>
+        }
+    }
+
+    fn update(&mut self, msg: Self::Message) -> ShouldRender {
+        match msg {
+            NotesComponentMsg::Internal(msg) => self.update_internal(msg),
+            NotesComponentMsg::NoteEvent(msg) => self.update_note_events(msg),
         }
     }
 
@@ -449,11 +471,14 @@ impl Component for NotesComponent {
     }
 
     fn rendered(&mut self, first_render: bool) {
+        use InternalNotesComponentMessage::*;
         if first_render {
-            self.link.send_message(NotesComponentMsg::UpdateNotes);
+            self.link
+                .send_message(NotesComponentMsg::Internal(UpdateNotes));
             self._interval_task = Some(IntervalService::spawn(
                 Duration::new(1, 0),
-                self.link.callback(|_| NotesComponentMsg::TickNoteTimers),
+                self.link
+                    .callback(|_| NotesComponentMsg::Internal(TickNoteTimers)),
             ));
         }
     }

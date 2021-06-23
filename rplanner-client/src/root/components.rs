@@ -6,36 +6,44 @@ use yew::{
 
 use web_sys::HtmlElement;
 
-use super::agents::{EventBus, ModalEvent, Request as BusRequest};
-use crate::notes::api::{ImageListResponse, JsonFetchResponse};
+use super::agents::{EventBus, ModalEvent, NoteEvent, Request as BusRequest};
+use crate::notes::api::{log_to_js, ImageListResponse, JsonFetchResponse};
 use crate::notes::components::NotesComponent;
 
 pub enum ModalImageSelectorMessage {
     GetImages,
     ReceivedImages(Vec<String>),
+    InsertImageRequest(String),
+}
+
+#[derive(Properties, Clone)]
+pub struct ModalImageSelectorProps {
+    insert_image_callback: Callback<String>,
 }
 
 pub struct ModalImageSelector {
     _get_image_list_task: Option<FetchTask>,
     image_paths: Option<Vec<String>>,
     link: ComponentLink<Self>,
+    insert_image_callback: Callback<String>,
 }
 
-fn view_modal_image_tooltip(path: &String) -> Html {
+fn view_modal_image_tooltip(path: &String, click_callback: Callback<MouseEvent>) -> Html {
     html! {
-        <img class=classes!("image-thumbnail") src=format!("images/{}", path) />
+        <img class=classes!("image-thumbnail") src=format!("images/{}", path) onclick=click_callback />
     }
 }
 
 impl Component for ModalImageSelector {
     type Message = ModalImageSelectorMessage;
-    type Properties = ();
+    type Properties = ModalImageSelectorProps;
 
-    fn create(_props: Self::Properties, link: ComponentLink<Self>) -> Self {
+    fn create(props: Self::Properties, link: ComponentLink<Self>) -> Self {
         Self {
             _get_image_list_task: None,
             image_paths: None,
             link,
+            insert_image_callback: props.insert_image_callback,
         }
     }
 
@@ -57,14 +65,18 @@ impl Component for ModalImageSelector {
                         .batch_callback(|response: JsonFetchResponse<ImageListResponse>| {
                             let Json(data) = response.into_body();
                             match data {
-                                Ok(v) => vec![ModalImageSelectorMessage::ReceivedImages(v.images)],
-                                Err(_) => vec![],
+                                Ok(v) => Some(ModalImageSelectorMessage::ReceivedImages(v.images)),
+                                Err(_) => None,
                             }
                         });
 
                 let task = FetchService::fetch(request, callback).unwrap();
                 self._get_image_list_task = Some(task);
 
+                false
+            }
+            ModalImageSelectorMessage::InsertImageRequest(path) => {
+                self.insert_image_callback.emit(path);
                 false
             }
         }
@@ -80,7 +92,9 @@ impl Component for ModalImageSelector {
                     </div>
                     <div class=classes!("image-viewer")>
                     {v.iter().map(|path| {
-                        view_modal_image_tooltip(path)
+                        let path_clone = path.clone();
+                        let callback = self.link.callback(move |_| ModalImageSelectorMessage::InsertImageRequest(path_clone.clone()));
+                        view_modal_image_tooltip(path, callback)
                     }).collect::<Html>()}
                     </div>
                     </>
@@ -106,23 +120,72 @@ enum ModalState {
     Closed,
 }
 
+pub enum ModalComponentMessage {
+    ModalEvent(ModalEvent),
+    InsertImageRequest(String),
+}
+
 pub struct ModalComponent {
     modal_ref: NodeRef,
     modal_background_ref: NodeRef,
-    _producer: Box<dyn Bridge<EventBus>>,
+    producer: Box<dyn Bridge<EventBus>>,
     link: ComponentLink<Self>,
     modal_state: ModalState,
 }
 
+impl ModalComponent {
+    fn update_modal_event(&mut self, msg: ModalEvent) -> bool {
+        match msg {
+            ModalEvent::OpenImageSelector => {
+                self.modal_ref
+                    .cast::<HtmlElement>()
+                    .unwrap()
+                    .style()
+                    .set_property("display", "block")
+                    .unwrap();
+                self.modal_background_ref
+                    .cast::<HtmlElement>()
+                    .unwrap()
+                    .style()
+                    .set_property("display", "block")
+                    .unwrap();
+
+                self.modal_state = ModalState::ImageSelector;
+                true
+            }
+            ModalEvent::CloseModal => {
+                self.modal_ref
+                    .cast::<HtmlElement>()
+                    .unwrap()
+                    .style()
+                    .set_property("display", "none")
+                    .unwrap();
+                self.modal_background_ref
+                    .cast::<HtmlElement>()
+                    .unwrap()
+                    .style()
+                    .set_property("display", "none")
+                    .unwrap();
+
+                self.modal_state = ModalState::Closed;
+                true
+            }
+        }
+    }
+}
+
 impl Component for ModalComponent {
-    type Message = BusRequest;
+    type Message = ModalComponentMessage;
     type Properties = ();
 
     fn create(_props: Self::Properties, link: ComponentLink<Self>) -> Self {
         Self {
             modal_ref: NodeRef::default(),
             modal_background_ref: NodeRef::default(),
-            _producer: EventBus::bridge(link.callback(|msg| msg)),
+            producer: EventBus::bridge(link.batch_callback(|msg| match msg {
+                BusRequest::ModalEvent(msg) => Some(ModalComponentMessage::ModalEvent(msg)),
+                _ => None,
+            })),
             link,
             modal_state: ModalState::Closed,
         }
@@ -134,55 +197,25 @@ impl Component for ModalComponent {
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
         match msg {
-            BusRequest::ModalEvent(msg) => match msg {
-                ModalEvent::OpenImageSelector => {
-                    self.modal_ref
-                        .cast::<HtmlElement>()
-                        .unwrap()
-                        .style()
-                        .set_property("display", "block")
-                        .unwrap();
-                    self.modal_background_ref
-                        .cast::<HtmlElement>()
-                        .unwrap()
-                        .style()
-                        .set_property("display", "block")
-                        .unwrap();
-
-                    self.modal_state = ModalState::ImageSelector;
-                    true
-                }
-                ModalEvent::CloseModal => {
-                    self.modal_ref
-                        .cast::<HtmlElement>()
-                        .unwrap()
-                        .style()
-                        .set_property("display", "none")
-                        .unwrap();
-                    self.modal_background_ref
-                        .cast::<HtmlElement>()
-                        .unwrap()
-                        .style()
-                        .set_property("display", "none")
-                        .unwrap();
-
-                    self.modal_state = ModalState::Closed;
-                    true
-                }
-            },
+            ModalComponentMessage::ModalEvent(msg) => self.update_modal_event(msg),
+            ModalComponentMessage::InsertImageRequest(path) => {
+                self.producer
+                    .send(BusRequest::NoteEvent(NoteEvent::InsertImageRequest(path)));
+                false
+            }
         }
     }
 
     fn view(&self) -> Html {
         html! {
             <>
-            <div ref=self.modal_background_ref.clone() class="modal-background" onclick=self.link.callback(|_| BusRequest::ModalEvent(ModalEvent::CloseModal)) />
+            <div ref=self.modal_background_ref.clone() class="modal-background" onclick=self.link.callback(|_| ModalComponentMessage::ModalEvent(ModalEvent::CloseModal)) />
             <div ref=self.modal_ref.clone() class="modal">
                 {
                 match self.modal_state {
                     ModalState::ImageSelector => {
                         html! {
-                            <ModalImageSelector />
+                            <ModalImageSelector insert_image_callback=self.link.callback(|s| ModalComponentMessage::InsertImageRequest(s)) />
                         }
                     },
                     ModalState::Closed => {
