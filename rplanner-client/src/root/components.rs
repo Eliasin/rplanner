@@ -201,6 +201,8 @@ impl Component for ModalComponent {
             ModalComponentMessage::InsertImageRequest(path) => {
                 self.producer
                     .send(BusRequest::NoteEvent(NoteEvent::InsertImageRequest(path)));
+
+                self.update_modal_event(ModalEvent::CloseModal);
                 false
             }
         }

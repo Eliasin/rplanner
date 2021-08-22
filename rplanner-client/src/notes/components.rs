@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::time::Duration;
+use web_sys::HtmlElement;
 
 use chrono::offset::Utc;
 use yew::services::fetch::{FetchService, FetchTask, Request};
@@ -10,6 +11,7 @@ use yew::{
     events::ChangeData,
     format::{Binary, Json, Nothing},
     prelude::*,
+    utils,
 };
 use ModalEvent::OpenImageSelector;
 
@@ -17,6 +19,7 @@ use wasm_bindgen::JsCast;
 use web_sys::File;
 
 use anyhow::anyhow;
+use anyhow::Error;
 
 use super::api::InsertImageRequest as InsertImageRequestStruct;
 use super::api::*;
@@ -29,11 +32,12 @@ fn view_note_element(
     note_id: NoteID,
     order: u32,
     text_input_callback: Callback<InputData>,
+    keypress_callback: Callback<KeyboardEvent>,
 ) -> Html {
     match &element {
         NoteElement::Text(v) => {
             html! {
-                <div class=classes!("note") data-note-id=note_id.to_string() data-order=order.to_string() contentEditable="true" oninput=text_input_callback>{v}</div>
+                <div class=classes!("note") data-note-id=note_id.to_string() data-order=order.to_string() contentEditable="true" oninput=text_input_callback onkeypress=keypress_callback>{v}</div>
             }
         }
         NoteElement::Image(v) => {
@@ -44,16 +48,27 @@ fn view_note_element(
     }
 }
 
+fn handle_keyboard_event(event: KeyboardEvent) -> Option<NotesComponentMsg> {
+    match event.key().as_str() {
+        "Backspace" => Some(NoteKeyEvent::Backspace.new_msg(event)),
+        "ArrowUp" => Some(NoteKeyEvent::ArrowUp.new_msg(event)),
+        "ArrowDown" => Some(NoteKeyEvent::ArrowDown.new_msg(event)),
+        "Enter" => Some(NoteKeyEvent::Enter.new_msg(event)),
+        _ => None,
+    }
+}
+
 fn view_note(note_id: NoteID, note: &Note, link: &ComponentLink<NotesComponent>) -> Html {
     html! {
         <div class="noteBlock">
-            <button class="noteButton noteImage" onclick={link.callback(|_| NotesComponentMsg::Internal(InternalNotesComponentMessage::OpenImageModel))}><i class="las la-image"/></button>
-            <button class="noteButton noteDelete" onclick={link.callback(move |_| NotesComponentMsg::Internal(InternalNotesComponentMessage::DeleteNote(note_id)))}><i class="las la-times"/></button>
+            <button class="noteButton noteImage" onclick={link.callback(|_| InternalNotesComponentMessage::open_image_modal_msg())}><i class="las la-image"/></button>
+            <button class="noteButton noteDelete" onclick={link.callback(move |_| InternalNotesComponentMessage::delete_note_msg(note_id))}><i class="las la-times"/></button>
             <div class="note" id=format!("note-{}", note_id)>
             { note.content.iter().enumerate().map(|(i, f): (usize, &NoteElement)| {
                 view_note_element(f.clone(), note_id, i.try_into().unwrap(), link.callback(move |_| {
-                    NotesComponentMsg::Internal(InternalNotesComponentMessage::EditNote(note_id))
-                }))
+                    InternalNotesComponentMessage::note_edited_msg(note_id)
+                }),
+                link.batch_callback(move |event: KeyboardEvent| handle_keyboard_event(event)))
             }).collect::<Html>() }
             </div>
         </div>
@@ -66,16 +81,49 @@ struct NoteTimer {
 }
 
 #[derive(Debug)]
+pub enum NoteKeyEvent {
+    Backspace,
+    ArrowUp,
+    ArrowDown,
+    Enter,
+}
+
+impl NoteKeyEvent {
+    pub fn new_msg(self, event: KeyboardEvent) -> NotesComponentMsg {
+        NotesComponentMsg::Internal(InternalNotesComponentMessage::NoteKeyEvent(self, event))
+    }
+}
+
+#[derive(Debug)]
 pub enum InternalNotesComponentMessage {
     UpdateNotes,
     DeleteNote(NoteID),
     ReceivedNotes(Result<EnumeratedNotes, anyhow::Error>),
-    EditNote(NoteID),
+    NoteKeyEvent(NoteKeyEvent, KeyboardEvent),
+    NoteEdited(NoteID),
     TickNoteTimers,
     AddNote,
     OpenImageModel,
     UploadImage(String, Vec<u8>),
     StartReadingImage(File),
+}
+
+impl InternalNotesComponentMessage {
+    pub fn open_image_modal_msg() -> NotesComponentMsg {
+        NotesComponentMsg::Internal(InternalNotesComponentMessage::OpenImageModel)
+    }
+
+    pub fn delete_note_msg(note_id: NoteID) -> NotesComponentMsg {
+        NotesComponentMsg::Internal(InternalNotesComponentMessage::DeleteNote(note_id))
+    }
+
+    pub fn note_edited_msg(note_id: NoteID) -> NotesComponentMsg {
+        NotesComponentMsg::Internal(InternalNotesComponentMessage::NoteEdited(note_id))
+    }
+
+    pub fn update_notes_msg() -> NotesComponentMsg {
+        NotesComponentMsg::Internal(InternalNotesComponentMessage::UpdateNotes)
+    }
 }
 
 #[derive(Debug)]
@@ -100,6 +148,95 @@ pub struct NotesComponent {
 }
 
 impl NotesComponent {
+    fn handle_backspace_in_note(&mut self) -> Result<(), Error> {
+        let position = get_caret_position()?;
+
+        let note_id = position.noteID;
+
+        let at_beginning_of_fragment = position.index == 0;
+
+        if at_beginning_of_fragment {
+            let last_fragment_num =
+                get_last_fragment_num(note_id, position.fragmentNum, &self.notes)
+                    .ok_or(Error::msg("No fragments to delete"))?;
+
+            self.delete_note_fragment(note_id, last_fragment_num)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_enter_in_note(&mut self, keyboard_event: KeyboardEvent) -> Result<(), Error> {
+        /* The default enter key behaviour in content editable divs is to insert new div elements with
+         * br elements inside so we must change it to instead insert newlines
+         */
+        let raw_event = AsRef::<web_sys::Event>::as_ref(&keyboard_event);
+        raw_event.prevent_default();
+        match utils::window().get_selection() {
+            Ok(selection) => match selection {
+                Some(selection) => {
+                    let anchor_offset = selection.anchor_offset();
+
+                    let note_element = raw_event
+                        .target()
+                        .ok_or(Error::msg("Could not get enter key event target"))?
+                        .dyn_into::<HtmlElement>()
+                        .map_err(|_| {
+                            Error::msg("Could not cast enter key event target into HtmlElement")
+                        })?;
+
+                    let note_id = get_note_element_id(&note_element)?;
+                    let note_text = note_element.text_content().ok_or(Error::msg(
+                        "Cannot proceed with enter key event as note node does not have text",
+                    ))?;
+
+                    let (start_text, end_text) = note_text.split_at(anchor_offset as usize);
+
+                    note_element
+                        .set_text_content(Some(format!("{}\n{}", start_text, end_text).as_str()));
+
+                    let range = utils::document()
+                        .create_range()
+                        .map_err(|_| Error::msg("Could not create js range"))?;
+
+                    let first_child_node = note_element
+                        .child_nodes()
+                        .item(0)
+                        .ok_or(Error::msg("Element does not have child nodes"))?;
+
+                    range
+                        .set_start(&first_child_node, anchor_offset + 1)
+                        .map_err(|_| Error::msg("Could not set range start"))?;
+
+                    selection
+                        .remove_all_ranges()
+                        .map_err(|_| Error::msg("Could not remove ranges from selection"))?;
+
+                    selection
+                        .add_range(&range)
+                        .map_err(|_| Error::msg("Could not add range to selection"))?;
+
+                    self.link
+                        .send_message(InternalNotesComponentMessage::note_edited_msg(note_id));
+
+                    Ok(())
+                }
+                None => Err(Error::msg("Could not get window selection")),
+            },
+            Err(e) => Err(Error::msg(
+                e.as_string().unwrap_or("No error provided".to_string()),
+            )),
+        }
+    }
+
+    fn delete_note_fragment(
+        &mut self,
+        note_id: NoteID,
+        fragment_num: FragmentNum,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+
     fn delete_note(&mut self, note_id: NoteID) -> Result<(), anyhow::Error> {
         let request_object = DeleteNoteRequest { note_id };
 
@@ -107,9 +244,9 @@ impl NotesComponent {
             .header("Content-Type", "application/json")
             .body(Json(&request_object))?;
 
-        let callback = self.link.callback(|_: JsonFetchResponse<()>| {
-            NotesComponentMsg::Internal(InternalNotesComponentMessage::UpdateNotes)
-        });
+        let callback = self
+            .link
+            .callback(|_: JsonFetchResponse<()>| InternalNotesComponentMessage::update_notes_msg());
 
         let task = FetchService::fetch(request, callback)?;
 
@@ -231,9 +368,42 @@ impl NotesComponent {
 }
 
 impl NotesComponent {
+    fn reset_note_flush_timer(&mut self, note_id: NoteID) {
+        match self.note_timers.get_mut(&note_id) {
+            Some(timer) => {
+                timer.ticks_since_last_edit = 0;
+            }
+            None => {
+                self.note_timers.insert(
+                    note_id,
+                    NoteTimer {
+                        ticks_since_last_edit: 0,
+                    },
+                );
+            }
+        };
+    }
+
     fn update_internal(&mut self, msg: InternalNotesComponentMessage) -> bool {
         use InternalNotesComponentMessage::*;
         match msg {
+            NoteKeyEvent(event_type, event) => {
+                use self::NoteKeyEvent::*;
+                let result = match event_type {
+                    Backspace => self.handle_backspace_in_note(),
+                    Enter => self.handle_enter_in_note(event),
+                    _ => Err(Error::msg("Unimplemented key event")),
+                };
+
+                match result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        log_error_to_js(e);
+                    }
+                }
+
+                true
+            }
             UpdateNotes => {
                 let request = Request::get("/api/get_notes").body(Nothing).unwrap();
 
@@ -251,7 +421,8 @@ impl NotesComponent {
                 false
             }
             ReceivedNotes(notes) => match notes {
-                Ok(notes) => {
+                Ok(mut notes) => {
+                    notes.sort_by(|a, b| a.0.cmp(&b.0));
                     self.notes = notes;
                     true
                 }
@@ -260,21 +431,8 @@ impl NotesComponent {
                     false
                 }
             },
-            EditNote(note_id) => {
-                match self.note_timers.get_mut(&note_id) {
-                    Some(timer) => {
-                        timer.ticks_since_last_edit = 0;
-                    }
-                    None => {
-                        self.note_timers.insert(
-                            note_id,
-                            NoteTimer {
-                                ticks_since_last_edit: 0,
-                            },
-                        );
-                    }
-                };
-
+            NoteEdited(note_id) => {
+                self.reset_note_flush_timer(note_id);
                 false
             }
             TickNoteTimers => {
@@ -356,8 +514,9 @@ impl NotesComponent {
         match msg {
             InsertImageRequest(path) => {
                 let caret_position = match get_caret_position() {
-                    Some(v) => v,
-                    None => {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log_error_to_js(e);
                         return false;
                     }
                 };
@@ -374,7 +533,8 @@ impl NotesComponent {
                     .body(Json(&insert_image_request))
                 {
                     Ok(v) => v,
-                    Err(_) => {
+                    Err(e) => {
+                        log_error_to_js(anyhow::Error::new(e));
                         return false;
                     }
                 };
@@ -390,6 +550,8 @@ impl NotesComponent {
                         return false;
                     }
                 };
+
+                log_to_js(&"HERE");
 
                 self._insert_image_task = Some(task);
 
