@@ -141,6 +141,7 @@ pub struct NotesComponent {
     _upload_image_fetch_task: Option<FetchTask>,
     _read_image_task: Option<ReaderTask>,
     _insert_image_task: Option<FetchTask>,
+    _delete_note_fragment_fetch_task: Option<FetchTask>,
     event_bus: Box<dyn Bridge<EventBus>>,
     notes: EnumeratedNotes,
     link: ComponentLink<Self>,
@@ -234,6 +235,23 @@ impl NotesComponent {
         note_id: NoteID,
         fragment_num: FragmentNum,
     ) -> Result<(), anyhow::Error> {
+        let delete_fragment_request = DeleteFragmentRequest {
+            note_id,
+            fragment_num,
+        };
+
+        let request = Request::post("/api/delete_fragment")
+            .header("Content-Type", "application/json")
+            .body(Json(&delete_fragment_request))?;
+
+        let callback = self
+            .link
+            .callback(|_: JsonFetchResponse<()>| InternalNotesComponentMessage::update_notes_msg());
+
+        let task = FetchService::fetch(request, callback)?;
+
+        self._delete_note_fragment_fetch_task = Some(task);
+
         Ok(())
     }
 
@@ -332,7 +350,6 @@ impl NotesComponent {
     }
 
     fn add_note(&mut self) -> Result<(), anyhow::Error> {
-        use InternalNotesComponentMessage::*;
         let note = Note {
             content: vec![NoteElement::Text("New note...".to_string())],
             date: Utc::now().to_rfc2822(),
@@ -344,7 +361,7 @@ impl NotesComponent {
 
         let callback = self
             .link
-            .callback(|_: JsonFetchResponse<()>| NotesComponentMsg::Internal(UpdateNotes));
+            .callback(|_: JsonFetchResponse<()>| InternalNotesComponentMessage::update_notes_msg());
 
         let task = FetchService::fetch(request, callback)?;
 
@@ -575,6 +592,7 @@ impl Component for NotesComponent {
             _upload_image_fetch_task: None,
             _read_image_task: None,
             _insert_image_task: None,
+            _delete_note_fragment_fetch_task: None,
             event_bus: EventBus::bridge(link.batch_callback(|msg| match msg {
                 BusRequest::NoteEvent(msg) => Some(NotesComponentMsg::NoteEvent(msg)),
                 _ => None,
