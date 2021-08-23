@@ -184,7 +184,7 @@ function moveCaretPositionIntoNote(position: CaretPosition) {
                 const textNode = textFragment.childNodes[0];
 
                 /* When we try to move the caret into a note fragment with no text,
-                 * we need toset the start of the range to be the note element as opposed
+                 * we need to set the start of the range to be the note element as opposed
                  * to what we do normally which is using the text node.
                  */
                 if (textNode === undefined) {

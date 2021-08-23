@@ -37,7 +37,7 @@ fn view_note_element(
     match &element {
         NoteElement::Text(v) => {
             html! {
-                <div class=classes!("note") data-note-id=note_id.to_string() data-order=order.to_string() contentEditable="true" oninput=text_input_callback onkeypress=keypress_callback>{v}</div>
+                <div class=classes!("note-fragment", "note-text") data-note-id=note_id.to_string() data-order=order.to_string() contentEditable="true" oninput=text_input_callback onkeydown=keypress_callback>{v}</div>
             }
         }
         NoteElement::Image(v) => {
@@ -149,16 +149,73 @@ pub struct NotesComponent {
 }
 
 impl NotesComponent {
+    fn handle_down_arrow_in_note(&mut self, keyboard_event: KeyboardEvent) -> Result<(), Error> {
+        let raw_event = AsRef::<web_sys::Event>::as_ref(&keyboard_event);
+
+        let position = get_caret_position()?;
+        let note_id = get_note_element_id(
+            &raw_event
+                .target()
+                .ok_or(Error::msg("Could not get down arrow event target"))?
+                .dyn_into::<HtmlElement>()
+                .map_error_to_anyhow("Could not cast down arrow event target into HtmlElement")?,
+        )?;
+
+        let note = get_note_by_id(note_id, &self.notes)
+            .ok_or(Error::msg("Could not get note in down arrow handler"))?;
+
+        let (line_offset, line_number) = get_line_based_position(&position, &self.notes)?;
+        log_to_js(&format!(
+            "Caret in line number {} with offset {}",
+            line_number, line_offset
+        ));
+
+        let position_in_last_line_of_note = line_number + 1 == note.content.len();
+        if position_in_last_line_of_note {
+            raw_event.prevent_default();
+            raw_event.stop_propagation();
+
+            let next_text_fragment_num =
+                get_next_text_fragment_num(note_id, position.fragment_num, &self.notes)
+                    .ok_or(Error::msg("There is no next text fragment"))?;
+
+            let next_text_fragment_content =
+                get_text_fragment_content(note_id, next_text_fragment_num, &self.notes)?;
+
+            let first_line_length = next_text_fragment_content
+                .split('\n')
+                .collect::<Vec<&str>>()
+                .get(0)
+                .unwrap_or(&"")
+                .len();
+
+            log_to_js(&format!(
+                "Next fragment has first line length of {}",
+                first_line_length
+            ));
+
+            let target_index = std::cmp::min(line_offset, first_line_length) as u32;
+            log_to_js(&format!("Jumping to target index {}", target_index));
+            move_caret_into_position(CaretPosition {
+                note_id,
+                fragment_num: next_text_fragment_num,
+                index: target_index,
+            })?;
+        }
+
+        Ok(())
+    }
+
     fn handle_backspace_in_note(&mut self) -> Result<(), Error> {
         let position = get_caret_position()?;
 
-        let note_id = position.noteID;
+        let note_id = position.note_id;
 
         let at_beginning_of_fragment = position.index == 0;
 
         if at_beginning_of_fragment {
             let last_fragment_num =
-                get_last_fragment_num(note_id, position.fragmentNum, &self.notes)
+                get_last_fragment_num(note_id, position.fragment_num, &self.notes)
                     .ok_or(Error::msg("No fragments to delete"))?;
 
             self.delete_note_fragment(note_id, last_fragment_num)?;
@@ -182,9 +239,9 @@ impl NotesComponent {
                         .target()
                         .ok_or(Error::msg("Could not get enter key event target"))?
                         .dyn_into::<HtmlElement>()
-                        .map_err(|_| {
-                            Error::msg("Could not cast enter key event target into HtmlElement")
-                        })?;
+                        .map_error_to_anyhow(
+                            "Could not cast enter key event target into HtmlElement",
+                        )?;
 
                     let note_id = get_note_element_id(&note_element)?;
                     let note_text = note_element.text_content().ok_or(Error::msg(
@@ -198,7 +255,7 @@ impl NotesComponent {
 
                     let range = utils::document()
                         .create_range()
-                        .map_err(|_| Error::msg("Could not create js range"))?;
+                        .map_error_to_anyhow("Could not create js range")?;
 
                     let first_child_node = note_element
                         .child_nodes()
@@ -207,15 +264,15 @@ impl NotesComponent {
 
                     range
                         .set_start(&first_child_node, anchor_offset + 1)
-                        .map_err(|_| Error::msg("Could not set range start"))?;
+                        .map_error_to_anyhow("Could not set range start")?;
 
                     selection
                         .remove_all_ranges()
-                        .map_err(|_| Error::msg("Could not remove ranges from selection"))?;
+                        .map_error_to_anyhow("Could not remove ranges from selection")?;
 
                     selection
                         .add_range(&range)
-                        .map_err(|_| Error::msg("Could not add range to selection"))?;
+                        .map_error_to_anyhow("Could not add range to selection")?;
 
                     self.link
                         .send_message(InternalNotesComponentMessage::note_edited_msg(note_id));
@@ -409,6 +466,7 @@ impl NotesComponent {
                 let result = match event_type {
                     Backspace => self.handle_backspace_in_note(),
                     Enter => self.handle_enter_in_note(event),
+                    ArrowDown => self.handle_down_arrow_in_note(event),
                     _ => Err(Error::msg("Unimplemented key event")),
                 };
 
@@ -539,8 +597,8 @@ impl NotesComponent {
                 };
 
                 let insert_image_request = InsertImageRequestStruct {
-                    note_id: caret_position.noteID,
-                    fragment_num: caret_position.fragmentNum,
+                    note_id: caret_position.note_id,
+                    fragment_num: caret_position.fragment_num,
                     index: caret_position.index as usize,
                     image_name: path,
                 };
@@ -567,8 +625,6 @@ impl NotesComponent {
                         return false;
                     }
                 };
-
-                log_to_js(&"HERE");
 
                 self._insert_image_task = Some(task);
 

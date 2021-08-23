@@ -61,8 +61,8 @@ pub struct DeleteFragmentRequest {
 
 #[derive(Serialize, Debug)]
 pub struct CaretPosition {
-    pub noteID: NoteID,
-    pub fragmentNum: FragmentNum,
+    pub note_id: NoteID,
+    pub fragment_num: FragmentNum,
     pub index: u32,
 }
 

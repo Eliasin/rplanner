@@ -117,9 +117,12 @@ input[type="file"] {
     filter: drop-shadow(2px 2px 3px #111);
 }
 
+.note-fragment {
+    font-family: "Gill Sans", sans-serif;
+    width: 100%;
+}
 
 .note {
-    font-family: "Gill Sans", sans-serif;
     margin: 2%;
     grid-column-start: 1;
     grid-column-end: 4;
