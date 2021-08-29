@@ -119,23 +119,74 @@ pub fn get_caret_position() -> Result<CaretPosition, Error> {
     }
 }
 
+pub fn get_note_text_fragments(
+    note_id: NoteID,
+    notes: &EnumeratedNotes,
+) -> Result<Vec<(FragmentNum, String)>, Error> {
+    let note = get_note_by_id(note_id, notes).ok_or(Error::msg("Could not get note by id"))?;
+
+    Ok(note
+        .content
+        .iter()
+        .enumerate()
+        .filter_map(
+            |(index, element): (usize, &NoteElement)| -> Option<(FragmentNum, String)> {
+                match element {
+                    NoteElement::Text(v) => Some((index as FragmentNum, v.clone())),
+                    NoteElement::Image(_) => None,
+                }
+            },
+        )
+        .collect())
+}
+
+pub fn get_text_fragment_offset_from_sibling(
+    note_id: NoteID,
+    sibling_fragment: FragmentNum,
+    offset: i32,
+    notes: &EnumeratedNotes,
+) -> Result<FragmentNum, Error> {
+    let text_fragments = get_note_text_fragments(note_id, notes)?;
+
+    let mut sibling_position: Option<usize> = None;
+    for (index, (fragment_num, _)) in text_fragments.iter().enumerate() {
+        if *fragment_num == sibling_fragment {
+            sibling_position = Some(index);
+        }
+    }
+
+    if let Some(sibling_position) = sibling_position {
+        let target_fragment_position = sibling_position as i32 + offset;
+
+        if target_fragment_position < 0 {
+            return Err(Error::msg("Offset fragment from sibling out of bounds"));
+        }
+
+        return match text_fragments.get(target_fragment_position as usize) {
+            Some((fragment_num, _)) => Ok(*fragment_num),
+            None => Err(Error::msg("Offset fragment from sibling out of bounds")),
+        };
+    }
+
+    Err(Error::msg(format!(
+        "Sibling fragment not found when deriving offset"
+    )))
+}
+
 pub fn get_next_text_fragment_num(
     note_id: NoteID,
     fragment_num: FragmentNum,
     notes: &EnumeratedNotes,
 ) -> Option<FragmentNum> {
-    let note = get_note_by_id(note_id, notes)?;
+    get_text_fragment_offset_from_sibling(note_id, fragment_num, 1, notes).ok()
+}
 
-    for i in fragment_num + 1..note.content.len() as i64 {
-        match note.content.get(i as usize).unwrap() {
-            NoteElement::Text(_) => {
-                return Some(i);
-            }
-            _ => {}
-        };
-    }
-
-    None
+pub fn get_previous_text_fragment_num(
+    note_id: NoteID,
+    fragment_num: FragmentNum,
+    notes: &EnumeratedNotes,
+) -> Option<FragmentNum> {
+    get_text_fragment_offset_from_sibling(note_id, fragment_num, -1, notes).ok()
 }
 
 pub fn move_caret_into_position(position: CaretPosition) -> Result<(), Error> {

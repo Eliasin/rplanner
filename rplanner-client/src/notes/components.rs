@@ -165,10 +165,6 @@ impl NotesComponent {
             .ok_or(Error::msg("Could not get note in down arrow handler"))?;
 
         let (line_offset, line_number) = get_line_based_position(&position, &self.notes)?;
-        log_to_js(&format!(
-            "Caret in line number {} with offset {}",
-            line_number, line_offset
-        ));
 
         let position_in_last_line_of_note = line_number + 1 == note.content.len();
         if position_in_last_line_of_note {
@@ -189,16 +185,74 @@ impl NotesComponent {
                 .unwrap_or(&"")
                 .len();
 
-            log_to_js(&format!(
-                "Next fragment has first line length of {}",
-                first_line_length
-            ));
-
             let target_index = std::cmp::min(line_offset, first_line_length) as u32;
-            log_to_js(&format!("Jumping to target index {}", target_index));
             move_caret_into_position(CaretPosition {
                 note_id,
                 fragment_num: next_text_fragment_num,
+                index: target_index,
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_up_arrow_in_note(&mut self, keyboard_event: KeyboardEvent) -> Result<(), Error> {
+        let raw_event = AsRef::<web_sys::Event>::as_ref(&keyboard_event);
+
+        let position = get_caret_position()?;
+        let note_id = get_note_element_id(
+            &raw_event
+                .target()
+                .ok_or(Error::msg("Could not get down arrow event target"))?
+                .dyn_into::<HtmlElement>()
+                .map_error_to_anyhow("Could not cast down arrow event target into HtmlElement")?,
+        )?;
+
+        let (line_offset, line_number) = get_line_based_position(&position, &self.notes)?;
+
+        let position_in_first_line_of_note = line_number == 0;
+        if position_in_first_line_of_note {
+            raw_event.prevent_default();
+            raw_event.stop_propagation();
+
+            let previous_text_fragment_num =
+                get_previous_text_fragment_num(note_id, position.fragment_num, &self.notes)
+                    .ok_or(Error::msg("There is no next text fragment"))?;
+
+            let previous_text_fragment_content =
+                get_text_fragment_content(note_id, previous_text_fragment_num, &self.notes)?;
+
+            log_to_js(&format!(
+                "Last line of prev text fragment: {:?}",
+                previous_text_fragment_content
+                    .split('\n')
+                    .collect::<Vec<&str>>()
+                    .split_last()
+                    .map(|(_, rest)| rest.split_last().map(|inner| inner.0))
+                    .flatten()
+            ));
+
+            let previous_text_lines = previous_text_fragment_content
+                .split('\n')
+                .collect::<Vec<&str>>();
+
+            // Since these contents end with a newline, the actual last line is actually the second last
+            let last_line_length = previous_text_lines
+                .len()
+                .checked_sub(2)
+                .map_or("", |i| previous_text_lines.get(i).unwrap_or(&""))
+                .len();
+
+            let index_at_start_of_last_line =
+                previous_text_fragment_content.len() - last_line_length - 1;
+            let target_index = std::cmp::min(
+                previous_text_fragment_content.len(),
+                index_at_start_of_last_line + line_offset,
+            ) as u32;
+
+            move_caret_into_position(CaretPosition {
+                note_id,
+                fragment_num: previous_text_fragment_num,
                 index: target_index,
             })?;
         }
@@ -467,7 +521,7 @@ impl NotesComponent {
                     Backspace => self.handle_backspace_in_note(),
                     Enter => self.handle_enter_in_note(event),
                     ArrowDown => self.handle_down_arrow_in_note(event),
-                    _ => Err(Error::msg("Unimplemented key event")),
+                    ArrowUp => self.handle_up_arrow_in_note(event),
                 };
 
                 match result {
