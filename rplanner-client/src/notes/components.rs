@@ -718,7 +718,8 @@ impl Component for NotesComponent {
         html! {
             <>
             { self.view_notes() }
-            <div class="functionBar">
+            <div class="function-bar">
+                <div class="function-bar-buttons">
                 <button class="addNote" onclick=self.link.callback(|_| NotesComponentMsg::Internal(AddNote))><i class=classes!("las", "la-plus") /></button>
                 <label class="image-file-upload">
                 <input type="file" accept=".png,.jpg" onchange=self.link.batch_callback(|event| {
@@ -744,6 +745,7 @@ impl Component for NotesComponent {
                 })/>
                     <i class=classes!("las", "la-file-image") />
                 </label>
+                </div>
             </div>
             </>
         }

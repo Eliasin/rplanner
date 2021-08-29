@@ -3,8 +3,10 @@
 use wasm_bindgen::prelude::*;
 use yew::start_app;
 
+mod modal;
 mod notes;
 mod root;
+mod todo;
 
 use root::components::RootComponent;
 

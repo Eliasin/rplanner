@@ -1,8 +1,6 @@
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum NoteElement {
@@ -21,7 +19,6 @@ pub struct Note {
     pub date: String,
 }
 
-pub type DBConnection = Arc<Mutex<Connection>>;
 pub type NoteID = i64;
 pub type FragmentNum = i64;
 pub type NoteFragment = (NoteID, NoteElement, FragmentNum);

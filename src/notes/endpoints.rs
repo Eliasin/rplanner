@@ -9,6 +9,7 @@ use crate::internal_error::{InternalError, InternalResult};
 
 use super::data::*;
 use super::helpers::*;
+use crate::data::DBConnection;
 
 #[get("/get_notes")]
 pub fn get_notes(db_connection: &State<DBConnection>) -> InternalResult<Json<Vec<(NoteID, Note)>>> {
